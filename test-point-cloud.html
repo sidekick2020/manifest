@@ -1146,6 +1146,9 @@
 
       // Keyboard shortcuts
       window.addEventListener('keydown', onKeyDown);
+
+      // When URL hash changes (e.g. back/forward or manual edit), select that user if in universe
+      window.addEventListener('hashchange', applyUserFromUrl);
     }
 
     // Store point metadata for interaction
@@ -1297,13 +1300,13 @@
         // Spherical coords with clustering
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(2 * Math.random() - 1);
-        const r = 30 + Math.random() * 40; // radius 30-70
+        const r = 50 + Math.random() * 60; // radius 50-110 (wider spread)
 
         // Add some clustering (simulate neighborhoods)
         const clusterId = Math.floor(Math.random() * 10);
-        const clusterOffset = clusterId * 15;
+        const clusterOffset = clusterId * 24;
         const clusterTheta = Math.random() * Math.PI * 2;
-        const clusterR = Math.random() * 10;
+        const clusterR = Math.random() * 18;
 
         const x = r * Math.sin(phi) * Math.cos(theta) + clusterR * Math.cos(clusterTheta);
         const y = r * Math.sin(phi) * Math.sin(theta) + clusterR * Math.sin(clusterTheta);
@@ -1627,6 +1630,29 @@
       selectedLabel = null;
     }
 
+    function getUserIdFromUrl() {
+      const hash = location.hash.slice(1);
+      return hash || null;
+    }
+
+    function setUrlForUser(userId) {
+      const base = location.pathname + location.search;
+      if (userId) {
+        history.replaceState(null, '', base + '#' + encodeURIComponent(userId));
+      } else {
+        history.replaceState(null, '', base);
+      }
+    }
+
+    function applyUserFromUrl() {
+      if (!points || !pointMetadata.length) return;
+      const userId = getUserIdFromUrl();
+      if (!userId) return;
+      const idx = memberIndexMap.get(decodeURIComponent(userId));
+      if (idx === undefined || idx === selectedMemberIndex) return;
+      flashPoint(idx);
+    }
+
     function flashPoint(index) {
       // Show detail panel
       const metadata = pointMetadata[index];
@@ -1817,6 +1843,9 @@
 
       detailEl.classList.add('visible');
 
+      // Update URL so this user can be revisited via the same link
+      setUrlForUser(metadata.id);
+
       // Remove blur after content is swapped — triggers fade-back-in transition
       if (alreadyOpen) {
         requestAnimationFrame(() => {
@@ -1861,7 +1890,7 @@
 
       let t = 0;
       const animateZoom = () => {
-        t += 0.03;
+        t += 0.02;  // 50% slower (was 0.03)
         if (t > 1) t = 1;
 
         camera.position.lerpVectors(startPos, endPos, t);
@@ -1904,6 +1933,9 @@
     window.closeDetail = () => {
       document.getElementById('detail').classList.remove('visible');
       selectedMemberIndex = null;
+
+      // Clear user from URL so root URL shows no selection
+      setUrlForUser(null);
 
       // Clear selection halo
       if (points && points.material && points.material.uniforms) {
@@ -2616,11 +2648,11 @@
           if (d < nearestDist) nearestDist = d;
         }
         if (nearestDist < Infinity) {
-          maxSafeRadius = nearestDist * 0.45; // stay within 45% of way to nearest star
+          maxSafeRadius = nearestDist * 0.55; // stay within 55% of way to nearest star (planets further out)
         }
       }
-      // Keep orbits tight — cap at 1.8 world units regardless
-      maxSafeRadius = Math.min(maxSafeRadius, 1.8);
+      // Cap at 2.8 world units — allows larger orbits, planets further from stars
+      maxSafeRadius = Math.min(maxSafeRadius, 2.8);
 
       // ── Fixed world-space planet size cap ──────────────────────────────────────
       // Planet sizes are fixed in world space so they look correct at any zoom level.
@@ -2656,7 +2688,7 @@
       // step outward by enough to clear the previous planet and the current one.
       const orbitRadii = [];
       const HOST_STAR_R = starWorldRadius; // use actual star world radius
-      let r = HOST_STAR_R + planetSizes[0] / 2 + 0.05; // first orbit clears star
+      let r = HOST_STAR_R + planetSizes[0] / 2 + 0.15; // first orbit clears star with more padding
       for (let i = 0; i < count; i++) {
         const ps = planetSizes[i];
         // Ensure this planet clears the previous planet
@@ -4089,6 +4121,9 @@
           points.geometry.attributes.activity.needsUpdate = true;
         }
       }
+
+      // If URL has a user id, select that user (e.g. returning to a bookmarked link)
+      if (points && pointMetadata.length > 0) applyUserFromUrl();
     }
 
     // ─── Universe Snapshot System ───────────────────────────────────────────────
@@ -4286,6 +4321,7 @@
             document.getElementById('admin-synthetic').textContent = '0';
             document.getElementById('count').textContent = realCount.toLocaleString();
             updateJob(job.id, { message: `Restored ${restored.toLocaleString()} members from snapshot. Checking for new members...`, progress: 15 });
+            applyUserFromUrl();
           }
         } else {
           // No snapshot — load from localStorage skips or start fresh
