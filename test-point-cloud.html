@@ -1631,14 +1631,14 @@
     }
 
     function getUserIdFromUrl() {
-      const hash = location.hash.slice(1);
+      const hash = location.hash.slice(1).replace(/^\//, '');
       return hash || null;
     }
 
     function setUrlForUser(userId) {
       const base = location.pathname + location.search;
       if (userId) {
-        history.replaceState(null, '', base + '#' + encodeURIComponent(userId));
+        history.replaceState(null, '', base + '#/' + encodeURIComponent(userId));
       } else {
         history.replaceState(null, '', base);
       }
@@ -1884,7 +1884,7 @@
       const distToTarget = camera.position.distanceTo(targetPos);
       if (distToTarget <= 12) return; // already zoomed in — don't re-animate
 
-      const endPos = targetPos.clone().add(new THREE.Vector3(3, 3, 5));
+      const endPos = targetPos.clone().add(new THREE.Vector3(1, 1, 5/3));  // 3x closer zoom
       const startPos = camera.position.clone();
       const startTarget = controls.target.clone();
 
