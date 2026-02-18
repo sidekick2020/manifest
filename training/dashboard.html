@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manifest Training Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #07060E;
+    color: #e0e0e8;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  /* Header */
+  .header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 24px; gap: 16px;
+  }
+  .header-left {}
+  h1 {
+    font-size: 22px; font-weight: 600; letter-spacing: 0.04em;
+    background: linear-gradient(90deg, #67B3FD, #B190FF);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 4px;
+  }
+  .subtitle { font-size: 12px; color: #888; letter-spacing: 0.06em; }
+
+  /* Run training button */
+  .run-btn-primary {
+    padding: 10px 22px; border-radius: 8px;
+    border: 1px solid rgba(39,197,206,0.4);
+    background: rgba(39,197,206,0.12); color: #27C5CE;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    font-family: inherit; transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .run-btn-primary:hover:not(:disabled) { background: rgba(39,197,206,0.22); border-color: rgba(39,197,206,0.6); }
+  .run-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .run-btn-primary.running { border-color: rgba(255,200,60,0.4); color: #FFD580; background: rgba(255,200,60,0.08); }
+
+  /* Live log */
+  #liveLog {
+    display: none;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 20px;
+    font-family: monospace;
+    font-size: 11px;
+    color: #aaa;
+    max-height: 200px;
+    overflow-y: auto;
+    line-height: 1.6;
+  }
+  #liveLog .log-error { color: #FF8C42; }
+  #liveLog .log-highlight { color: #27C5CE; font-weight: bold; }
+  .log-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+    font-size: 11px; color: #666; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  #logStatus { color: #FFD580; }
+
+  /* Run selector */
+  .run-selector { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .run-chip {
+    padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.04); color: #aaa; font-size: 11px; cursor: pointer;
+    font-family: monospace; transition: all 0.2s;
+  }
+  .run-chip:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .run-chip.selected { background: rgba(39,197,206,0.15); border-color: rgba(39,197,206,0.4); color: #27C5CE; }
+  .run-chip.compare { background: rgba(177,144,255,0.15); border-color: rgba(177,144,255,0.4); color: #B190FF; }
+  .instructions { font-size: 11px; color: #666; margin-bottom: 10px; }
+
+  /* Load section */
+  .load-section { text-align: center; padding: 40px; }
+  .load-file-btn {
+    padding: 12px 28px; border-radius: 8px; border: 1px solid rgba(39,197,206,0.3);
+    background: rgba(39,197,206,0.1); color: #27C5CE; font-size: 14px; cursor: pointer;
+    font-family: inherit; transition: all 0.2s;
+  }
+  .load-file-btn:hover { background: rgba(39,197,206,0.2); }
+  .file-input { display: none; }
+
+  /* Dashboard grid */
+  .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .dashboard { grid-template-columns: 1fr; } }
+
+  .card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 20px;
+    backdrop-filter: blur(20px);
+  }
+  .card.wide { grid-column: 1 / -1; }
+  .card.hero {
+    grid-column: 1 / -1;
+    border-color: rgba(39,197,206,0.2);
+    background: rgba(39,197,206,0.04);
+  }
+  .card h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #888; margin-bottom: 14px;
+  }
+  .card.hero h2 { color: rgba(39,197,206,0.8); }
+
+  /* Hero: connection gravity metric */
+  .conn-gravity-layout {
+    display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start;
+  }
+  .conn-big-number {
+    font-size: 56px; font-weight: 700; font-family: monospace;
+    line-height: 1; letter-spacing: -0.02em;
+  }
+  .conn-big-number.good { color: #3CDC78; }
+  .conn-big-number.warn { color: #FFD580; }
+  .conn-big-number.bad { color: #FF5038; }
+  .conn-big-number.neutral { color: #67B3FD; }
+  .conn-big-number.none { color: #555; }
+  .conn-label { font-size: 12px; color: #888; margin-top: 6px; }
+  .conn-goal {
+    font-size: 11px; color: #666; margin-top: 10px; line-height: 1.5;
+    border-left: 2px solid rgba(39,197,206,0.3); padding-left: 10px;
+  }
+  .conn-goal strong { color: #27C5CE; }
+  .conn-scale {
+    display: flex; flex-direction: column; gap: 6px; min-width: 140px;
+  }
+  .scale-row { display: flex; align-items: center; gap: 8px; }
+  .scale-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .scale-text { font-size: 11px; color: #888; }
+  .scale-text strong { display: block; font-size: 12px; }
+
+  /* Progress bar for correlation */
+  .corr-bar-wrap { margin-top: 12px; }
+  .corr-bar-track {
+    height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px;
+    position: relative; overflow: visible;
+  }
+  .corr-bar-fill {
+    height: 100%; border-radius: 4px; position: absolute; top: 0;
+    transition: width 0.5s ease, background 0.5s ease;
+  }
+  .corr-bar-labels { display: flex; justify-content: space-between; margin-top: 4px; }
+  .corr-bar-labels span { font-size: 9px; color: #555; font-family: monospace; }
+
+  /* Metric rows */
+  .metric-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+  .metric-row:last-child { border-bottom: none; }
+  .metric-label { font-size: 12px; color: #999; }
+  .metric-value { font-family: monospace; font-size: 14px; font-weight: 600; }
+  .metric-value.good { color: #3CDC78; }
+  .metric-value.warn { color: #FFD580; }
+  .metric-value.bad { color: #FF5038; }
+  .metric-value.neutral { color: #67B3FD; }
+
+  /* Comparison values */
+  .compare-values { display: flex; gap: 16px; }
+  .compare-val { text-align: right; }
+  .compare-val .label { font-size: 9px; letter-spacing: 0.1em; margin-bottom: 2px; }
+  .compare-val.primary .label { color: #27C5CE; }
+  .compare-val.secondary .label { color: #B190FF; }
+  .compare-val .val { font-family: monospace; font-size: 14px; font-weight: 600; }
+
+  /* Bar charts */
+  .bar-chart { margin-top: 8px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .bar-label { font-size: 11px; color: #999; width: 60px; text-align: right; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 18px; background: rgba(255,255,255,0.03); border-radius: 4px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; position: absolute; }
+  .bar-fill.primary { background: rgba(39,197,206,0.5); }
+  .bar-fill.secondary { background: rgba(177,144,255,0.4); }
+  .bar-count { font-size: 10px; font-family: monospace; color: #aaa; width: 50px; flex-shrink: 0; }
+
+  /* Confusion matrix */
+  .confusion-grid { display: grid; grid-template-columns: auto 1fr 1fr; gap: 2px; margin-top: 8px; }
+  .confusion-cell { padding: 8px 12px; text-align: center; font-family: monospace; font-size: 13px; border-radius: 4px; }
+  .confusion-header { font-size: 10px; color: #888; padding: 4px 8px; text-align: center; letter-spacing: 0.08em; }
+  .confusion-row-label { font-size: 10px; color: #888; padding: 8px; display: flex; align-items: center; justify-content: flex-end; letter-spacing: 0.08em; }
+  .tp { background: rgba(60,220,120,0.15); color: #3CDC78; }
+  .fp { background: rgba(255,80,56,0.12); color: #FF8C42; }
+  .fn { background: rgba(255,200,60,0.12); color: #FFD580; }
+  .tn { background: rgba(103,179,253,0.12); color: #67B3FD; }
+
+  canvas { width: 100%; border-radius: 6px; }
+  .fitness-container { height: 80px; }
+
+  .timeline { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .timeline-bar { flex: 1; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; position: relative; overflow: hidden; }
+  .timeline-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #27C5CE, #B190FF); }
+  .timeline-label { font-size: 10px; font-family: monospace; color: #888; white-space: nowrap; }
+
+  .no-data { text-align: center; padding: 40px; color: #555; font-size: 13px; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-family: monospace; letter-spacing: 0.04em; }
+  .badge.recent { background: rgba(177,144,255,0.15); color: #B190FF; }
+  .badge.early { background: rgba(39,197,206,0.15); color: #27C5CE; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>Manifest Training Dashboard</h1>
+    <p class="subtitle">Spatial layout + prediction model performance</p>
+  </div>
+  <button id="runTrainingBtn" class="run-btn-primary" onclick="runTraining()">▶ Run Training</button>
+</div>
+
+<!-- Live training log -->
+<div id="liveLogWrap" style="display:none">
+  <div class="log-header">
+    <span>Live Output</span>
+    <span id="logStatus">Running...</span>
+  </div>
+  <div id="liveLog"></div>
+</div>
+
+<!-- Run selector -->
+<div class="load-section" id="loadSection">
+  <p style="color:#888;margin-bottom:12px;font-size:13px">No run files found. Run training to generate data, or load existing <code style="color:#B190FF">run-*.json</code> files.</p>
+  <button class="load-file-btn" onclick="document.getElementById('fileInput').click()">Load Run Files</button>
+  <input type="file" id="fileInput" class="file-input" accept=".json" multiple>
+  <p style="color:#555;margin-top:12px;font-size:11px">Shift+click two runs to compare them side-by-side.</p>
+</div>
+
+<div id="runSelectorWrap" style="display:none">
+  <div class="instructions">Click a run to view. <strong>Shift+click</strong> a second run to compare.</div>
+  <div class="run-selector" id="runSelector"></div>
+</div>
+
+<!-- Dashboard -->
+<div class="dashboard" id="dashboard" style="display:none">
+
+  <!-- HERO: Connection Gravity -->
+  <div class="card hero" id="connCard">
+    <h2>Connection Gravity — Comment-Distance Correlation</h2>
+    <div class="conn-gravity-layout">
+      <div>
+        <div id="connBigNumber" class="conn-big-number none">—</div>
+        <div class="conn-label" id="connBigLabel">Pearson correlation: comment strength vs 3D distance</div>
+        <div class="conn-goal">
+          <strong>Goal: negative correlation</strong><br>
+          Users who comment with each other should sit <em>closer</em> in the 3D universe.<br>
+          More negative = stronger pull between commenting pairs.
+        </div>
+        <div class="corr-bar-wrap" id="corrBarWrap"></div>
+      </div>
+      <div class="conn-scale">
+        <div class="scale-row"><div class="scale-dot" style="background:#3CDC78"></div><div class="scale-text"><strong style="color:#3CDC78">−0.3 to −1.0</strong>Strong comment gravity</div></div>
+        <div class="scale-row"><div class="scale-dot" style="background:#FFD580"></div><div class="scale-text"><strong style="color:#FFD580">−0.1 to −0.3</strong>Moderate pull</div></div>
+        <div class="scale-row"><div class="scale-dot" style="background:#FF5038"></div><div class="scale-text"><strong style="color:#FF5038">−0.1 to +1.0</strong>Weak or wrong direction</div></div>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">
+          <div class="scale-text" style="font-size:10px;color:#666">Pair count</div>
+          <div id="connPairCount" class="metric-value neutral" style="font-size:18px;margin-top:4px">—</div>
+          <div class="scale-text" style="margin-top:6px;font-size:10px;color:#666">Mean distance</div>
+          <div id="connMeanDist" class="metric-value neutral" style="font-size:18px;margin-top:4px">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data overview -->
+  <div class="card" id="dataCard">
+    <h2>Data Overview</h2>
+    <div id="dataMetrics"></div>
+  </div>
+
+  <!-- Spatial Metrics -->
+  <div class="card" id="spatialCard">
+    <h2>Spatial Metrics</h2>
+    <div id="spatialMetrics"></div>
+  </div>
+
+  <!-- Fitness History -->
+  <div class="card" id="fitnessCard">
+    <h2>Fitness History (Evolution Sessions)</h2>
+    <div class="fitness-container">
+      <canvas id="fitnessCanvas" height="80"></canvas>
+    </div>
+  </div>
+
+  <!-- Prediction Accuracy -->
+  <div class="card" id="predCard">
+    <h2>Prediction Accuracy</h2>
+    <div id="predMetrics"></div>
+  </div>
+
+  <!-- Confusion Matrix -->
+  <div class="card" id="confCard">
+    <h2>Confusion Matrix</h2>
+    <div id="confusionMatrix"></div>
+  </div>
+
+  <!-- Risk Distribution -->
+  <div class="card" id="riskCard">
+    <h2>Risk Distribution</h2>
+    <div id="riskDist"></div>
+  </div>
+
+  <!-- Temporal Validation -->
+  <div class="card wide" id="temporalCard">
+    <h2>Temporal Validation (70/30 Train/Test Split)</h2>
+    <div id="temporalMetrics"></div>
+  </div>
+
+  <!-- Config -->
+  <div class="card wide" id="configCard">
+    <h2>Run Configuration</h2>
+    <div id="configMetrics"></div>
+  </div>
+
+</div>
+
+<script>
+const runs = [];
+let selectedIdx = null;
+let compareIdx = null;
+
+// --- Training runner ---
+
+function runTraining() {
+  const btn = document.getElementById('runTrainingBtn');
+  const logWrap = document.getElementById('liveLogWrap');
+  const log = document.getElementById('liveLog');
+  const logStatus = document.getElementById('logStatus');
+
+  btn.disabled = true;
+  btn.classList.add('running');
+  btn.textContent = '⏳ Training...';
+  logWrap.style.display = 'block';
+  log.innerHTML = '';
+  logStatus.textContent = 'Running...';
+
+  // Scroll log into view
+  logWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  fetch('/run-training', { method: 'POST' })
+    .then(res => {
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      function pump() {
+        return reader.read().then(({ done, value }) => {
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop();
+          for (const part of parts) {
+            const lines = part.split('\n');
+            let eventType = 'message';
+            let dataStr = '';
+            for (const line of lines) {
+              if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+              else if (line.startsWith('data: ')) dataStr = line.slice(6);
+            }
+            if (!dataStr) continue;
+            try {
+              const payload = JSON.parse(dataStr);
+              handleEvent(eventType, payload);
+            } catch (e) {}
+          }
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(err => {
+      appendLog('Error: ' + err.message, true);
+      finishRun(null);
+    });
+}
+
+function handleEvent(type, payload) {
+  const log = document.getElementById('liveLog');
+  const logStatus = document.getElementById('logStatus');
+
+  if (type === 'start') {
+    appendLog(payload.message);
+  } else if (type === 'log') {
+    appendLog(payload.line, payload.isError);
+  } else if (type === 'done') {
+    logStatus.textContent = payload.code === 0 ? 'Done ✓' : `Exited (${payload.code})`;
+    logStatus.style.color = payload.code === 0 ? '#3CDC78' : '#FF5038';
+    finishRun(payload.latest);
+  }
+}
+
+function appendLog(line, isError) {
+  const log = document.getElementById('liveLog');
+  const div = document.createElement('div');
+
+  // Highlight key metric lines
+  const isHighlight = /connectionVsDistance|correlation:|fitness:|Conn.*corr/i.test(line);
+
+  div.className = isHighlight ? 'log-highlight' : (isError ? 'log-error' : '');
+  div.textContent = line;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function finishRun(latestRunData) {
+  const btn = document.getElementById('runTrainingBtn');
+  btn.disabled = false;
+  btn.classList.remove('running');
+  btn.textContent = '▶ Run Training';
+
+  if (latestRunData) {
+    latestRunData._filename = latestRunData._filename || 'latest';
+    // Add to runs if not already present
+    const exists = runs.find(r => r._filename === latestRunData._filename);
+    if (!exists) {
+      runs.push(latestRunData);
+    } else {
+      runs[runs.indexOf(exists)] = latestRunData;
+    }
+    document.getElementById('loadSection').style.display = 'none';
+    document.getElementById('runSelectorWrap').style.display = 'block';
+    renderRunSelector();
+    selectRun(runs.length - 1);
+  }
+}
+
+// --- File loading ---
+
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const files = [...e.target.files].sort((a, b) => a.name.localeCompare(b.name));
+  for (const f of files) {
+    try {
+      const text = await f.text();
+      const data = JSON.parse(text);
+      data._filename = f.name;
+      runs.push(data);
+    } catch (err) { console.warn('Failed to parse', f.name, err); }
+  }
+  if (runs.length > 0) {
+    document.getElementById('loadSection').style.display = 'none';
+    document.getElementById('runSelectorWrap').style.display = 'block';
+    renderRunSelector();
+    selectRun(runs.length - 1);
+  }
+});
+
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  for (const f of e.dataTransfer.files) {
+    if (f.name.endsWith('.json')) {
+      try {
+        const text = await f.text();
+        const data = JSON.parse(text);
+        data._filename = f.name;
+        runs.push(data);
+      } catch (err) {}
+    }
+  }
+  if (runs.length > 0) {
+    document.getElementById('loadSection').style.display = 'none';
+    document.getElementById('runSelectorWrap').style.display = 'block';
+    renderRunSelector();
+    selectRun(runs.length - 1);
+  }
+});
+
+// --- Run selector ---
+
+function renderRunSelector() {
+  const el = document.getElementById('runSelector');
+  el.innerHTML = '';
+  runs.forEach((r, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'run-chip' +
+      (i === selectedIdx ? ' selected' : '') +
+      (i === compareIdx ? ' compare' : '');
+    const ts = new Date(r.timestamp);
+    const dateStr = isNaN(ts) ? '?' : ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const timeStr = isNaN(ts) ? '' : ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const members = r.data?.members || '?';
+    const isRecent = r.config?.recent;
+    btn.innerHTML = `${dateStr} ${timeStr}<br><span class="badge ${isRecent ? 'recent' : 'early'}">${isRecent ? 'RECENT' : 'EARLY'}</span> ${members}m`;
+    btn.onclick = (e) => {
+      if (e.shiftKey && selectedIdx !== null && selectedIdx !== i) {
+        compareIdx = i;
+      } else {
+        selectedIdx = i;
+        compareIdx = null;
+      }
+      renderRunSelector();
+      renderDashboard();
+    };
+    el.appendChild(btn);
+  });
+}
+
+function selectRun(idx) {
+  selectedIdx = idx;
+  compareIdx = null;
+  renderRunSelector();
+  renderDashboard();
+}
+
+// --- Formatting helpers ---
+
+function fmt(v, decimals = 3) {
+  if (v == null || v === 'N/A (skipped)') return '—';
+  if (typeof v === 'string') return v;
+  return Number(v).toFixed(decimals);
+}
+
+function pct(v) {
+  if (v == null) return '—';
+  return (v * 100).toFixed(1) + '%';
+}
+
+function riskColor(v) {
+  if (v == null) return 'neutral';
+  if (v >= 0.7) return 'good';
+  if (v >= 0.4) return 'warn';
+  return 'bad';
+}
+
+function recallColor(v) {
+  if (v == null) return 'neutral';
+  if (v >= 0.6) return 'good';
+  if (v >= 0.3) return 'warn';
+  return 'bad';
+}
+
+function corrColor(v) {
+  if (v == null) return 'none';
+  if (v <= -0.3) return 'good';
+  if (v <= -0.1) return 'warn';
+  return 'bad';
+}
+
+function metricRow(label, value, colorClass) {
+  return `<div class="metric-row">
+    <span class="metric-label">${label}</span>
+    <span class="metric-value ${colorClass || 'neutral'}">${value}</span>
+  </div>`;
+}
+
+function compareRow(label, v1, v2, colorFn) {
+  if (v2 == null) return metricRow(label, v1, colorFn ? colorFn(parseFloat(v1)) : 'neutral');
+  const c1 = colorFn ? colorFn(parseFloat(v1)) : 'neutral';
+  const c2 = colorFn ? colorFn(parseFloat(v2)) : 'neutral';
+  return `<div class="metric-row">
+    <span class="metric-label">${label}</span>
+    <div class="compare-values">
+      <div class="compare-val primary"><div class="label">PRIMARY</div><div class="val ${c1}">${v1}</div></div>
+      <div class="compare-val secondary"><div class="label">COMPARE</div><div class="val ${c2}">${v2}</div></div>
+    </div>
+  </div>`;
+}
+
+// --- Main render ---
+
+function renderDashboard() {
+  const r = runs[selectedIdx];
+  const c = compareIdx !== null ? runs[compareIdx] : null;
+  document.getElementById('dashboard').style.display = 'grid';
+
+  // Hero: Connection gravity
+  const cd = r.connectionVsDistance || {};
+  const corr = cd.correlation;
+  const bigNum = document.getElementById('connBigNumber');
+  const bigLabel = document.getElementById('connBigLabel');
+  const corrBarWrap = document.getElementById('corrBarWrap');
+  const pairCount = document.getElementById('connPairCount');
+  const meanDist = document.getElementById('connMeanDist');
+
+  if (corr != null) {
+    bigNum.textContent = corr.toFixed(3);
+    bigNum.className = 'conn-big-number ' + corrColor(corr);
+    bigLabel.textContent = 'Pearson correlation: comment strength vs 3D distance';
+    pairCount.textContent = (cd.pointCount || '—').toLocaleString();
+    meanDist.textContent = cd.meanDistance != null ? cd.meanDistance.toFixed(2) : '—';
+
+    // Draw the correlation bar: −1 (left, good) to +1 (right, bad)
+    // Map corr from [-1,1] to [0%,100%] — corr=-1 → fill=100%, corr=0 → fill=50%
+    const pct = ((1 - corr) / 2 * 100).toFixed(1); // higher fill = more negative = better
+    const fillColor = corr <= -0.3 ? '#3CDC78' : corr <= -0.1 ? '#FFD580' : '#FF5038';
+    corrBarWrap.innerHTML = `
+      <div style="margin-top:14px">
+        <div class="corr-bar-track">
+          <div class="corr-bar-fill" style="left:0;width:${pct}%;background:${fillColor}44;border-right:2px solid ${fillColor}"></div>
+        </div>
+        <div class="corr-bar-labels">
+          <span>−1.0 (perfect)</span>
+          <span>0.0 (random)</span>
+          <span>+1.0 (wrong)</span>
+        </div>
+      </div>`;
+  } else {
+    bigNum.textContent = cd.message ? '—' : '—';
+    bigNum.className = 'conn-big-number none';
+    bigLabel.textContent = cd.message || 'No spatial data (evolution skipped or not enough pairs)';
+    corrBarWrap.innerHTML = '';
+    pairCount.textContent = '—';
+    meanDist.textContent = '—';
+  }
+
+  // Data overview
+  const dr = r.data?.dataRange;
+  const dc = c?.data?.dataRange;
+  let dataHtml = '';
+  dataHtml += compareRow('Members', (r.data?.members || 0).toLocaleString(), c ? (c.data?.members || 0).toLocaleString() : null);
+  dataHtml += compareRow('Posts', (r.data?.posts || 0).toLocaleString(), c ? (c.data?.posts || 0).toLocaleString() : null);
+  dataHtml += compareRow('Comments', (r.data?.comments || 0).toLocaleString(), c ? (c.data?.comments || 0).toLocaleString() : null);
+  dataHtml += compareRow('SDC Records', (r.data?.soberDateChanges || 0).toLocaleString(), c ? (c.data?.soberDateChanges || 0).toLocaleString() : null);
+  if (dr) {
+    const from = new Date(dr.from).toISOString().slice(0, 10);
+    const to = new Date(dr.to).toISOString().slice(0, 10);
+    dataHtml += metricRow('Date Range', `${from} — ${to} (${dr.days}d)`, 'neutral');
+  }
+  document.getElementById('dataMetrics').innerHTML = dataHtml;
+
+  // Spatial metrics
+  const sp = r.predictedVsOptimal || {};
+  let spatialHtml = '';
+  spatialHtml += metricRow('Hash Accuracy', r.hashVsReality?.accuracyPct != null ? r.hashVsReality.accuracyPct + '%' : '—', 'neutral');
+  spatialHtml += metricRow('Conn-Distance Corr.', corr != null ? fmt(corr, 4) : (cd.message || '—'), corrColor(corr));
+  spatialHtml += metricRow('Pair Count', (cd.pointCount || '—').toLocaleString(), 'neutral');
+  spatialHtml += metricRow('Mean Comment Strength', cd.meanStrength != null ? fmt(cd.meanStrength, 2) : '—', 'neutral');
+  spatialHtml += metricRow('Position Mean Error', fmt(sp.meanError, 2), 'neutral');
+  spatialHtml += metricRow('Position R²', fmt(sp.r2, 4), 'neutral');
+  spatialHtml += metricRow('Evolution Sessions', r.sessions || 0, 'neutral');
+  document.getElementById('spatialMetrics').innerHTML = spatialHtml;
+
+  // Fitness history
+  renderFitnessChart(r.fitnessHistory || [], c?.fitnessHistory || []);
+
+  // Prediction accuracy
+  const pa = r.predictionAccuracy || {};
+  const pc = c?.predictionAccuracy || {};
+  let predHtml = '';
+  predHtml += compareRow('Recall (TPR)', pct(pa.recall), c ? pct(pc.recall) : null, recallColor);
+  predHtml += compareRow('Specificity', pct(pa.specificity), c ? pct(pc.specificity) : null, riskColor);
+  predHtml += compareRow('Precision', pct(pa.precision), c ? pct(pc.precision) : null, recallColor);
+  predHtml += compareRow('F1 Score', fmt(pa.f1), c ? fmt(pc.f1) : null);
+  predHtml += compareRow('FPR', pct(pa.fpr), c ? pct(pc.fpr) : null, v => v < 0.2 ? 'good' : v < 0.4 ? 'warn' : 'bad');
+  predHtml += metricRow('Labeled', `${(pa.labeledCount || 0).toLocaleString()} (${pa.relapseCount || 0} relapsed, ${pa.disengagedCount || 0} disengaged)`, 'neutral');
+  document.getElementById('predMetrics').innerHTML = predHtml;
+
+  // Confusion matrix
+  let confHtml = `<div class="confusion-grid">
+    <div></div>
+    <div class="confusion-header">Pred HIGH</div>
+    <div class="confusion-header">Pred LOW</div>
+    <div class="confusion-row-label">RELAPSED</div>
+    <div class="confusion-cell tp">TP: ${pa.tp || 0}</div>
+    <div class="confusion-cell fn">FN: ${pa.fn || 0}</div>
+    <div class="confusion-row-label">NOT REL.</div>
+    <div class="confusion-cell fp">FP: ${pa.fp || 0}</div>
+    <div class="confusion-cell tn">TN: ${pa.tn || 0}</div>
+  </div>`;
+  if (c) {
+    confHtml += `<div style="margin-top:12px;font-size:10px;color:#B190FF;letter-spacing:0.08em">COMPARE RUN</div>`;
+    confHtml += `<div class="confusion-grid">
+      <div></div>
+      <div class="confusion-header">Pred HIGH</div>
+      <div class="confusion-header">Pred LOW</div>
+      <div class="confusion-row-label">RELAPSED</div>
+      <div class="confusion-cell tp">TP: ${pc.tp || 0}</div>
+      <div class="confusion-cell fn">FN: ${pc.fn || 0}</div>
+      <div class="confusion-row-label">NOT REL.</div>
+      <div class="confusion-cell fp">FP: ${pc.fp || 0}</div>
+      <div class="confusion-cell tn">TN: ${pc.tn || 0}</div>
+    </div>`;
+  }
+  document.getElementById('confusionMatrix').innerHTML = confHtml;
+
+  // Risk distribution
+  const rd = pa.riskDistribution || {};
+  const rdC = pc.riskDistribution || {};
+  const maxBoth = Math.max(rd.low||0, rd.watch||0, rd.high||0, rd.unknown||0, rdC.low||0, rdC.watch||0, rdC.high||0, 1);
+  const levels = [
+    { key: 'high', label: 'High', color: '#FF5038' },
+    { key: 'watch', label: 'Watch', color: '#FFD580' },
+    { key: 'low', label: 'Low', color: '#3CDC78' },
+    { key: 'unknown', label: 'N/A', color: '#555' },
+  ];
+  let riskHtml = '<div class="bar-chart">';
+  for (const l of levels) {
+    const v = rd[l.key] || 0;
+    const w = (v / maxBoth * 100).toFixed(1);
+    riskHtml += `<div class="bar-row">
+      <span class="bar-label" style="color:${l.color}">${l.label}</span>
+      <div class="bar-track">
+        <div class="bar-fill primary" style="width:${w}%;background:${l.color}55"></div>`;
+    if (c) {
+      const vC = rdC[l.key] || 0;
+      const wC = (vC / maxBoth * 100).toFixed(1);
+      riskHtml += `<div class="bar-fill secondary" style="width:${wC}%;background:${l.color}30;border:1px solid ${l.color}55;box-sizing:border-box"></div>`;
+    }
+    riskHtml += `</div>
+      <span class="bar-count">${v.toLocaleString()}${c ? ' / ' + (rdC[l.key]||0).toLocaleString() : ''}</span>
+    </div>`;
+  }
+  riskHtml += '</div>';
+  document.getElementById('riskDist').innerHTML = riskHtml;
+
+  // Temporal validation
+  const tv = r.temporalValidation || {};
+  const tvC = c?.temporalValidation || {};
+  let tempHtml = '';
+  if (tv.error) {
+    tempHtml = `<div class="no-data">${tv.error}</div>`;
+  } else {
+    tempHtml += `<div class="timeline">
+      <span class="timeline-label">${tv.trainCutoff ? new Date(tv.trainCutoff).toISOString().slice(0,10) : '?'}</span>
+      <div class="timeline-bar"><div class="timeline-fill" style="width:${((tv.trainWindowDays||70)/(tv.timeRangeDays||100)*100).toFixed(0)}%"></div></div>
+      <span class="timeline-label">${tv.timeRangeDays || '?'}d total</span>
+    </div>`;
+    tempHtml += '<div style="margin-top:12px">';
+    tempHtml += compareRow('Recall', pct(tv.recall), c ? pct(tvC.recall) : null, recallColor);
+    tempHtml += compareRow('Specificity', pct(tv.specificity), c ? pct(tvC.specificity) : null, riskColor);
+    tempHtml += compareRow('Precision', pct(tv.precision), c ? pct(tvC.precision) : null, recallColor);
+    tempHtml += compareRow('F1', fmt(tv.f1), c ? fmt(tvC.f1) : null);
+    tempHtml += compareRow('FPR', pct(tv.fpr), c ? pct(tvC.fpr) : null, v => v < 0.2 ? 'good' : v < 0.4 ? 'warn' : 'bad');
+    tempHtml += metricRow('Labeled', `${(tv.labeledCount||tv.relapseCount+tv.tn+tv.fp||0)} (${tv.relapseCount||0} relapsed)`, 'neutral');
+    tempHtml += '</div>';
+    tempHtml += `<div style="margin-top:12px"><div class="confusion-grid">
+      <div></div>
+      <div class="confusion-header">Pred HIGH</div>
+      <div class="confusion-header">Pred LOW</div>
+      <div class="confusion-row-label">RELAPSED</div>
+      <div class="confusion-cell tp">TP: ${tv.tp||0}</div>
+      <div class="confusion-cell fn">FN: ${tv.fn||0}</div>
+      <div class="confusion-row-label">NOT REL.</div>
+      <div class="confusion-cell fp">FP: ${tv.fp||0}</div>
+      <div class="confusion-cell tn">TN: ${tv.tn||0}</div>
+    </div></div>`;
+  }
+  document.getElementById('temporalMetrics').innerHTML = tempHtml;
+
+  // Config
+  const cfg = r.config || {};
+  const b = cfg.batch || {};
+  let cfgHtml = '';
+  cfgHtml += metricRow('Data Order', cfg.recent ? 'Most Recent (newest first)' : 'Earliest (oldest first)', 'neutral');
+  cfgHtml += metricRow('Batch Config', `${b.userLimit||'?'} users, ${b.postLimit||'?'} posts, ${b.commentLimit||'?'} comments, ${b.soberDateChangeLimit||0} SDC`, 'neutral');
+  cfgHtml += metricRow('Load Batches', cfg.loadBatches || '?', 'neutral');
+  cfgHtml += metricRow('Max Sessions', cfg.maxSessions || '?', 'neutral');
+  cfgHtml += metricRow('pairGravityScale', r.params?.pairGravityScale ?? r.config?.pairGravityScale ?? '—', 'neutral');
+  cfgHtml += metricRow('gravityFactor', r.params?.gravityFactor ?? r.config?.gravityFactor ?? '—', 'neutral');
+  cfgHtml += metricRow('Timestamp', r.timestamp || '?', 'neutral');
+  cfgHtml += metricRow('File', r._filename || '?', 'neutral');
+  document.getElementById('configMetrics').innerHTML = cfgHtml;
+}
+
+function renderFitnessChart(data1, data2) {
+  const canvas = document.getElementById('fitnessCanvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = 80 * dpr;
+  ctx.scale(dpr, dpr);
+  const w = canvas.offsetWidth;
+  const h = 80;
+
+  ctx.clearRect(0, 0, w, h);
+
+  if (data1.length === 0 && data2.length === 0) {
+    ctx.fillStyle = '#555';
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('No fitness data (evolution skipped or not yet run)', w / 2, h / 2);
+    return;
+  }
+
+  const allVals = [...data1, ...data2].filter(v => v != null);
+  const minV = Math.min(...allVals) * 0.98;
+  const maxV = Math.max(...allVals) * 1.02;
+  const range = maxV - minV || 1;
+
+  function drawLine(data, color) {
+    if (data.length < 2) return;
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    data.forEach((v, i) => {
+      const x = (i / (data.length - 1)) * w;
+      const y = h - ((v - minV) / range * (h - 10)) - 5;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  drawLine(data1, '#27C5CE');
+  if (data2.length > 0) drawLine(data2, '#B190FF');
+
+  ctx.fillStyle = '#888';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'left';
+  if (data1.length > 0) ctx.fillText(fmt(data1[data1.length - 1]), 4, 12);
+}
+</script>
+</body>
+</html>

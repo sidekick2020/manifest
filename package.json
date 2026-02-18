@@ -1,0 +1,29 @@
+{
+  "name": "manifest",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:v2": "vite --mode v2",
+    "build": "vite build",
+    "build:v2": "vite build --mode v2",
+    "preview": "vite preview",
+    "training": "node training/run.js",
+    "training:recent": "node training/run.js --recent",
+    "training:dashboard": "node training/serve-dashboard.js",
+    "sweep": "node training/sweep.js"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.182.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.5.1",
+    "vite": "^7.3.1"
+  }
+}

@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Training output data
+training/output/
+
+# macOS
+.DS_Store
+
+# Vite / env
+*.local
+.env
+.env.*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Old / legacy files — not part of current version
+index-v1.html
+src/App-v2.jsx
+src/main-v1.jsx
+src/components-v2/
+src/stores/universeStore-v2.js
+README-V2.md
+TESTING-V2.md
+PHASE_0_VALIDATION.md
+docs/
+test-import.html
