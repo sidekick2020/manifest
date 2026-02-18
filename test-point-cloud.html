@@ -221,12 +221,17 @@
       margin-right: 12px;
       flex-shrink: 0;
       border: 2px solid rgba(0, 204, 102, 0.3);
+      position: relative;
+      overflow: hidden;
     }
     .search-result-avatar img {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
       border-radius: 50%;
       object-fit: cover;
+      object-position: center;
       opacity: 0;
       transition: opacity 0.3s ease-in-out;
     }
@@ -350,12 +355,17 @@
       margin: 0 auto 16px;
       flex-shrink: 0;
       border: 4px solid rgba(0, 204, 102, 0.3);
+      position: relative;
+      overflow: hidden;
     }
     .detail-avatar img {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
       border-radius: 50%;
       object-fit: cover;
+      object-position: center;
       opacity: 0;
       transition: opacity 0.3s ease-in-out;
     }
@@ -406,10 +416,15 @@
     .supporter-card-bg {
       position: absolute; inset: 0;
       background: linear-gradient(160deg, rgba(30,20,60,0.9), rgba(10,8,30,0.97));
+      overflow: hidden;
     }
     .supporter-card-bg img {
-      width: 100%; height: 100%;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
       object-fit: cover;
+      object-position: center;
       opacity: 0.75;
     }
     .supporter-card-initials {
@@ -470,9 +485,12 @@
       z-index: 1;
     }
     .post-item img {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
+      object-position: center;
       opacity: 0;
       transition: opacity 0.3s ease-in-out;
     }
@@ -560,6 +578,7 @@
       width: 100%;
       max-height: 400px;
       object-fit: cover;
+      object-position: center;
       display: block;
     }
     .post-expanded-text {
@@ -608,11 +627,15 @@
       font-size: 16px;
       flex-shrink: 0;
       overflow: hidden;
+      position: relative;
     }
     .comment-avatar img {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
+      object-position: center;
     }
     .comment-content {
       flex: 1;
@@ -1062,8 +1085,9 @@
 
     // Search optimization: debouncing and caching
     let searchTimeout = null;
-    const searchCache = new Map(); // Cache key: query string, value: {results, timestamp}
+    const searchCache = new Map(); // Cache key: query string, value: {results, timestamp, version}
     const SEARCH_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+    const SEARCH_CACHE_VERSION = 2; // Bump to invalidate old cache (e.g. stale profile picture data)
     const SEARCH_DEBOUNCE_DELAY = 300; // 300ms debounce
 
     // Debounce utility function
@@ -1458,31 +1482,31 @@
       }
     }
 
-    // Build a circular canvas texture from an image URL for the sprite
-    function createProfileSprite(imageUrl, username) {
+    // Build a circular canvas texture from an image URL for the sprite (aspect-fill / cover)
+    function createProfileSprite(imageUrl, username, forMemberIndex) {
       const SIZE = 128;
       const canvas = document.createElement('canvas');
       canvas.width = SIZE;
       canvas.height = SIZE;
       const ctx = canvas.getContext('2d');
+      const cx = SIZE / 2;
+      const R = (SIZE / 2) * (2 / 3);
+      const PAD = SIZE / 2 - R;
+      const diam = SIZE - PAD * 2;
 
       function finalize(drawFn) {
         ctx.clearRect(0, 0, SIZE, SIZE);
-        // Image occupies 2/3 of sprite diameter — wide border of star glow visible around it
-        const R = (SIZE / 2) * (2 / 3); // 2/3 of radius
-        const PAD = SIZE / 2 - R;
         ctx.save();
         ctx.beginPath();
-        ctx.arc(SIZE / 2, SIZE / 2, R, 0, Math.PI * 2);
+        ctx.arc(cx, cx, R, 0, Math.PI * 2);
         ctx.closePath();
         ctx.clip();
         drawFn(PAD, R);
         ctx.restore();
-        // Thin white ring around the inset circle
         ctx.strokeStyle = 'rgba(255,255,255,0.55)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(SIZE / 2, SIZE / 2, R, 0, Math.PI * 2);
+        ctx.arc(cx, cx, R, 0, Math.PI * 2);
         ctx.stroke();
 
         const texture = new THREE.CanvasTexture(canvas);
@@ -1490,37 +1514,54 @@
           map: texture,
           transparent: true,
           depthWrite: false,
-          depthTest: false, // always visible — prevents vanishing behind beam geometry
+          depthTest: false,
           blending: THREE.NormalBlending,
         });
         const sprite = new THREE.Sprite(mat);
-        sprite.renderOrder = 10; // render after beams and stars
-        // 0.7 scene units — sits inside the star glow, not over it
+        sprite.renderOrder = 10;
         sprite.scale.set(0.7, 0.7, 1.0);
         return sprite;
       }
 
+      function drawImageCover(img, pad, r) {
+        const w = img.naturalWidth || img.width || 1;
+        const h = img.naturalHeight || img.height || 1;
+        const scale = Math.max(diam / w, diam / h);
+        const dw = w * scale;
+        const dh = h * scale;
+        ctx.drawImage(img, cx - dw / 2, cx - dh / 2, dw, dh);
+      }
+
+      function tryPlaceSprite(sprite) {
+        if (forMemberIndex !== undefined && selectedMemberIndex !== forMemberIndex) {
+          sprite.material.map.dispose();
+          sprite.material.dispose();
+          return;
+        }
+        placeSprite(sprite);
+      }
+
       if (imageUrl) {
         const img = new Image();
-        img.crossOrigin = 'anonymous'; // Back4App CDN returns CORS * — needed so drawImage doesn't taint canvas
-        img.onload = () => {
-          try {
-            const sprite = finalize((pad) => ctx.drawImage(img, pad, pad, SIZE - pad * 2, SIZE - pad * 2));
-            placeSprite(sprite);
-          } catch (e) {
-            // Canvas tainted despite crossOrigin — fall back to initials
+        loadImageWithBlobFallback(img, imageUrl,
+          () => {
+            try {
+              const sprite = finalize(() => drawImageCover(img, PAD, R));
+              tryPlaceSprite(sprite);
+            } catch (e) {
+              const sprite = finalize((pad) => drawInitialsOnCanvas(ctx, SIZE, pad, username));
+              tryPlaceSprite(sprite);
+            }
+          },
+          () => {
             const sprite = finalize((pad) => drawInitialsOnCanvas(ctx, SIZE, pad, username));
-            placeSprite(sprite);
-          }
-        };
-        img.onerror = () => {
-          const sprite = finalize((pad) => drawInitialsOnCanvas(ctx, SIZE, pad, username));
-          placeSprite(sprite);
-        };
-        img.src = imageUrl;
+            tryPlaceSprite(sprite);
+          },
+          { forCanvas: true }
+        );
       } else {
         const sprite = finalize((pad) => drawInitialsOnCanvas(ctx, SIZE, pad, username));
-        placeSprite(sprite);
+        tryPlaceSprite(sprite);
       }
     }
 
@@ -1565,11 +1606,15 @@
       scene.add(sprite);
     }
 
+    let _currentProfileBlobUrl = null;
+
     function clearSelectedOverlay() {
-      // Remove sprite
+      if (_currentProfileBlobUrl) {
+        URL.revokeObjectURL(_currentProfileBlobUrl);
+        _currentProfileBlobUrl = null;
+      }
       if (selectedSprite) {
         scene.remove(selectedSprite);
-        // Guard against placeholder object {_placeholder:true} which has no .material
         if (selectedSprite.material) {
           if (selectedSprite.material.map) selectedSprite.material.map.dispose();
           selectedSprite.material.dispose();
@@ -1577,7 +1622,6 @@
         selectedSprite._disposed = true;
         selectedSprite = null;
       }
-      // Hide label
       const lbl = document.getElementById('star-label');
       if (lbl) lbl.style.display = 'none';
       selectedLabel = null;
@@ -1624,12 +1668,7 @@
       const avatar = document.getElementById('detail-avatar');
       const username = metadata.username || metadata.id;
 
-      // Handle both string URLs and Parse File objects
-      const imageUrl = metadata.profilePicture
-        ? (typeof metadata.profilePicture === 'string'
-            ? metadata.profilePicture
-            : (metadata.profilePicture.url || null))
-        : null;
+      const imageUrl = getProfilePictureUrl(metadata.profilePicture);
 
       // Set up floating label color to match risk level
       const riskColors = { low: '#3CDC78', medium: '#FFD580', high: '#FF5038' };
@@ -1638,37 +1677,50 @@
       lblPip.style.background = pipColor;
       lblEl.style.display = 'block';
 
-      // Create a placeholder sprite immediately so placeSprite knows we're active
       selectedSprite = { _placeholder: true, _disposed: false };
-      // Build the real sprite (async if image load needed)
-      createProfileSprite(imageUrl, username);
 
       if (imageUrl) {
-        // Show loading shimmer
         avatar.classList.add('loading');
         avatar.textContent = '';
+        // Fetch once with CORS and use the blob URL for BOTH sidebar and sprite.
+        // The sprite needs a same-origin (blob) URL to draw to canvas; direct CDN URL often fails CORS for canvas.
+        fetch(imageUrl, { mode: 'cors' })
+          .then(r => r.ok ? r.blob() : Promise.reject(r.status))
+          .then(blob => {
+            if (selectedMemberIndex !== index) return;
+            const blobUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
+            if (_currentProfileBlobUrl) URL.revokeObjectURL(_currentProfileBlobUrl);
+            _currentProfileBlobUrl = blobUrl;
 
-        // Create image element
-        const img = document.createElement('img');
-        img.crossOrigin = 'anonymous'; // must match crossOrigin used in canvas draws to avoid cache poisoning
-        img.src = imageUrl;
-        img.alt = username;
+            const img = document.createElement('img');
+            img.alt = username;
+            avatar.appendChild(img);
+            img.onload = () => {
+              if (selectedMemberIndex !== index) return;
+              avatar.classList.remove('loading');
+              img.classList.add('loaded');
+            };
+            img.onerror = () => {
+              avatar.classList.remove('loading');
+              avatar.innerHTML = '';
+              avatar.textContent = getInitials(username);
+            };
+            img.src = blobUrl;
 
-        // Handle successful load
-        img.onload = () => {
-          avatar.classList.remove('loading');
-          img.classList.add('loaded');
-          avatar.appendChild(img);
-        };
-
-        // Handle error - show initials instead
-        img.onerror = () => {
-          avatar.classList.remove('loading');
-          avatar.innerHTML = '';
-          avatar.textContent = getInitials(username);
-        };
-
-        avatar.appendChild(img);
+            createProfileSprite(blobUrl, username, index);
+          })
+          .catch(() => {
+            if (selectedMemberIndex !== index) return;
+            createProfileSprite(null, username, index);
+            const img = document.createElement('img');
+            img.alt = username;
+            avatar.appendChild(img);
+            loadImageWithBlobFallback(img, imageUrl,
+              () => { avatar.classList.remove('loading'); img.classList.add('loaded'); },
+              () => { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); },
+              { forCanvas: false }
+            );
+          });
       } else {
         avatar.classList.remove('loading');
         avatar.innerHTML = '';
@@ -1680,12 +1732,12 @@
           const lazyIndex = index; // capture for stale-check
           const lazyParams = new URLSearchParams({
             where: JSON.stringify({ objectId: metadata.id }),
-            keys: 'objectId,proPic',
+            keys: 'objectId,proPic,profilePicture',
             limit: '1',
           });
           fetch(`https://parseapi.back4app.com/classes/_User?${lazyParams}`, {
             headers: {
-              'X-Parse-Application-Id': 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by',
+              'X-Parse-Application-Id': B4A_APP_ID,
               'X-Parse-REST-API-Key': 'rNXb9qIR6wrZ3n81OG33HVQkpPsXANUatiOE5HSq',
             }
           })
@@ -1693,36 +1745,39 @@
           .then(data => {
             const u = data.results && data.results[0];
             if (!u) return;
-            let url = null;
-            if (typeof u.proPic === 'string') url = u.proPic;
-            else if (u.proPic && u.proPic.url) url = u.proPic.url;
+            const url = getProfilePictureUrl(u.proPic || u.profilePicture);
             if (!url) return;
-            // Cache in metadata for future renders
             if (pointMetadata[lazyIndex]) pointMetadata[lazyIndex].profilePicture = url;
-            // Only update UI if user is still selected
             if (selectedMemberIndex !== lazyIndex) return;
-            // Update 3D sprite
-            createProfileSprite(url, username);
-            // Update sidebar avatar
-            avatar.innerHTML = '';
-            avatar.classList.add('loading');
-            const lazyImg = document.createElement('img');
-            lazyImg.crossOrigin = 'anonymous';
-            lazyImg.src = url;
-            lazyImg.alt = username;
-            lazyImg.onload = () => {
-              avatar.classList.remove('loading');
-              lazyImg.classList.add('loaded');
-              avatar.appendChild(lazyImg);
-            };
-            lazyImg.onerror = () => {
-              avatar.classList.remove('loading');
-              avatar.innerHTML = '';
-              avatar.textContent = getInitials(username);
-            };
-            avatar.appendChild(lazyImg);
+            fetch(url, { mode: 'cors' })
+              .then(r => r.ok ? r.blob() : Promise.reject(r.status))
+              .then(blob => {
+                if (selectedMemberIndex !== lazyIndex) return;
+                const blobUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
+                if (_currentProfileBlobUrl) URL.revokeObjectURL(_currentProfileBlobUrl);
+                _currentProfileBlobUrl = blobUrl;
+                avatar.innerHTML = '';
+                avatar.classList.add('loading');
+                const lazyImg = document.createElement('img');
+                lazyImg.alt = username;
+                avatar.appendChild(lazyImg);
+                lazyImg.onload = () => { avatar.classList.remove('loading'); lazyImg.classList.add('loaded'); };
+                lazyImg.onerror = () => { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); };
+                lazyImg.src = blobUrl;
+                createProfileSprite(blobUrl, username, lazyIndex);
+              })
+              .catch(() => {
+                if (selectedMemberIndex !== lazyIndex) return;
+                avatar.innerHTML = '';
+                avatar.classList.add('loading');
+                const lazyImg = document.createElement('img');
+                lazyImg.alt = username;
+                avatar.appendChild(lazyImg);
+                loadImageWithBlobFallback(lazyImg, url, () => { avatar.classList.remove('loading'); lazyImg.classList.add('loaded'); }, () => { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); }, { forCanvas: false });
+                createProfileSprite(null, username, lazyIndex);
+              });
           })
-          .catch(() => { /* silently ignore — initials remain */ });
+          .catch(() => { /* ignore */ });
         }
       }
 
@@ -1771,8 +1826,9 @@
         });
       }
 
-      // Load user's posts
-      loadUserPosts(metadata.id);
+      // Prioritize profile picture: delay posts so profile pic request wins the connection pool
+      const PROFILE_PRIORITY_DELAY_MS = 400;
+      setTimeout(() => loadUserPosts(metadata.id), PROFILE_PRIORITY_DELAY_MS);
 
       // Draw connection lines to users this person has commented to
       drawConnectionLines(metadata.id);
@@ -1877,11 +1933,10 @@
     async function performSearch(query, dropdown) {
       const queryLower = query.toLowerCase();
 
-      // Check cache first
+      // Check cache first (version must match so we don't use stale profile picture shape)
       const cacheKey = queryLower;
       const cached = searchCache.get(cacheKey);
-      if (cached && (Date.now() - cached.timestamp) < SEARCH_CACHE_DURATION) {
-        // Use cached results
+      if (cached && cached.version === SEARCH_CACHE_VERSION && (Date.now() - cached.timestamp) < SEARCH_CACHE_DURATION) {
         currentSearchResults = cached.results;
         selectedSearchIndex = -1;
         renderSearchResults(currentSearchResults, queryLower);
@@ -1924,7 +1979,7 @@
           }),
           order: '-TotalComments',
           limit: '10',
-          keys: 'username,objectId,proPic,sobrietyDate,TotalComments'
+          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments'
         });
 
         const response = await fetch(`https://parseapi.back4app.com/classes/_User?${params}`, {
@@ -1944,14 +1999,13 @@
 
         const data = await response.json();
         const matches = data.results.map(member => {
-          // Check if member is already in universe
-          const existingIndex = pointMetadata.findIndex(m => m.id === member.objectId);
-
+          const existingIndex = pointMetadata.findIndex(m => m.id == member.objectId);
+          const fileObj = member.proPic || member.profilePicture;
           return {
             member: {
               id: member.objectId,
               username: member.username || 'Anonymous',
-              profilePicture: member.proPic || null,
+              profilePicture: fileObj || null,
               sobrietyDate: member.sobrietyDate?.iso ?? null,
               sobrietyDays: member.sobrietyDate?.iso
                 ? Math.floor((Date.now() - new Date(member.sobrietyDate.iso).getTime()) / 86400000)
@@ -1993,7 +2047,8 @@
         // Cache the results
         searchCache.set(queryLower, {
           results: matches,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          version: SEARCH_CACHE_VERSION
         });
 
         if (currentSearchResults.length > 0) {
@@ -2038,6 +2093,60 @@
         })
         .catch(() => { if (fallbackHtml) imgEl.outerHTML = fallbackHtml; });
     };
+
+    /**
+     * Load an image into an img element. Use forCanvas: true only when drawing to canvas (sprite, planets).
+     * - forCanvas false (display only): no crossOrigin — image can load from CDNs that don't send CORS for GET.
+     * - forCanvas true: crossOrigin anonymous + blob fallback for wrong MIME; required so canvas is not tainted.
+     */
+    function loadImageWithBlobFallback(img, url, onLoad, onError, options) {
+      const forCanvas = options && options.forCanvas;
+      if (!url) { if (onError) onError(); return; }
+      if (forCanvas) img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        if (img._blobUrl) { URL.revokeObjectURL(img._blobUrl); img._blobUrl = null; }
+        if (onLoad) onLoad();
+      };
+      img.onerror = () => {
+        if (!forCanvas) { if (onError) onError(); return; }
+        if (img._blobAttempted) { if (onError) onError(); return; }
+        img._blobAttempted = true;
+        fetch(url, { mode: 'cors' })
+          .then(r => r.ok ? r.blob() : Promise.reject(r.status))
+          .then(blob => {
+            const objectUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
+            img._blobUrl = objectUrl;
+            img.onload = () => {
+              URL.revokeObjectURL(objectUrl);
+              img._blobUrl = null;
+              if (onLoad) onLoad();
+            };
+            img.onerror = () => {
+              URL.revokeObjectURL(objectUrl);
+              img._blobUrl = null;
+              if (onError) onError();
+            };
+            img.src = objectUrl;
+          })
+          .catch(() => { if (onError) onError(); });
+      };
+      img.src = url;
+    }
+
+    const B4A_APP_ID = 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by';
+    const B4A_PARSEFILES_BASE = 'https://parsefiles.back4app.com/' + B4A_APP_ID + '/';
+
+    /** Get profile picture URL from Parse File (proPic/profilePicture). Prefer .url from the Parse file. */
+    function getProfilePictureUrl(fileObj) {
+      if (!fileObj) return null;
+      if (typeof fileObj === 'string' && fileObj) return fileObj;
+      if (fileObj && typeof fileObj === 'object') {
+        if (fileObj.url) return fileObj.url;
+        if (fileObj.uri) return fileObj.uri;
+        if (fileObj.name) return B4A_PARSEFILES_BASE + encodeURIComponent(fileObj.name);
+      }
+      return null;
+    }
 
     // Main search member function with keyboard navigation
     window.searchMember = async (event) => {
@@ -2090,7 +2199,6 @@
         const username = member.username || member.id;
         const initials = getInitials(username);
 
-        // Highlight matching text
         const highlightedUsername = highlightText(username, query);
         const badge = isNew ? '<span style="font-size: 10px; color: #a78bfa; margin-left: 6px;">+ Add</span>' : '';
 
@@ -2098,8 +2206,8 @@
           <div class="search-result-item ${idx === selectedSearchIndex ? 'selected' : ''}"
                onclick="window.selectSearchResultByIndex(${idx})"
                data-index="${idx}">
-            <div class="search-result-avatar ${member.profilePicture ? 'loading' : ''}" data-avatar-id="avatar-${idx}">
-              ${member.profilePicture ? '' : initials}
+            <div class="search-result-avatar loading" data-avatar-id="avatar-${idx}" data-user-id="${member.id}">
+              ${initials}
             </div>
             <div class="search-result-info">
               <div class="search-result-username">@${highlightedUsername}${badge}</div>
@@ -2111,22 +2219,76 @@
         `;
       }).join('');
 
-      // Load profile pictures after rendering HTML
+      // 1) Use search response URLs immediately (display-only, no CORS so CDN works).
       results.forEach((result, idx) => {
-        if (result.member.profilePicture) {
-          loadAvatarImage(result.member.profilePicture, `avatar-${idx}`, result.member.username || result.member.id);
-        }
+        const url = getProfilePictureUrl(result.member.profilePicture);
+        const avatarId = `avatar-${idx}`;
+        const username = result.member.username || result.member.id;
+        if (url) loadAvatarImage(url, avatarId, username, result.member.id);
       });
+      // 2) Batch-fetch full _User docs in parallel; fill in any that didn't load from search.
+      fetchSearchResultProPicsBatch(results);
     }
 
-    function loadAvatarImage(src, avatarId, username) {
-      const avatar = document.querySelector(`[data-avatar-id="${avatarId}"]`);
+    /** Batch fetch proPic; only update avatars that are still loading (no image loaded yet). */
+    function fetchSearchResultProPicsBatch(results) {
+      if (!results.length) return;
+      const ids = results.map(r => r.member.id);
+      const params = new URLSearchParams({
+        where: JSON.stringify({ objectId: { $in: ids } }),
+        limit: String(ids.length),
+      });
+      fetch(`https://parseapi.back4app.com/classes/_User?${params}`, {
+        headers: {
+          'X-Parse-Application-Id': B4A_APP_ID,
+          'X-Parse-REST-API-Key': 'rNXb9qIR6wrZ3n81OG33HVQkpPsXANUatiOE5HSq',
+        },
+      })
+        .then(r => r.json())
+        .then(data => {
+          const picById = {};
+          (data.results || []).forEach(u => {
+            const url = getProfilePictureUrl(u.proPic || u.profilePicture);
+            if (url) picById[u.objectId] = url;
+          });
+          results.forEach((result, idx) => {
+            const userId = result.member.id;
+            const username = result.member.username || result.member.id;
+            const url = picById[userId];
+            const avatar = document.querySelector(`[data-avatar-id="avatar-${idx}"][data-user-id="${userId}"]`);
+            if (!avatar || !url) {
+              if (avatar && !url) {
+                avatar.classList.remove('loading');
+                avatar.textContent = getInitials(username);
+              }
+              return;
+            }
+            if (!avatar.classList.contains('loading')) return;
+            const img = avatar.querySelector('img.loaded');
+            if (img) return;
+            loadAvatarImage(url, `avatar-${idx}`, username, userId);
+          });
+        })
+        .catch(() => {
+          results.forEach((result, idx) => {
+            const userId = result.member.id;
+            const avatar = document.querySelector(`[data-avatar-id="avatar-${idx}"][data-user-id="${userId}"]`);
+            if (avatar && avatar.classList.contains('loading') && !avatar.querySelector('img.loaded')) {
+              avatar.classList.remove('loading');
+              avatar.textContent = getInitials(result.member.username || result.member.id);
+            }
+          });
+        });
+    }
+
+    function loadAvatarImage(src, avatarId, username, expectedUserId) {
+      const selector = expectedUserId
+        ? `[data-avatar-id="${avatarId}"][data-user-id="${expectedUserId}"]`
+        : `[data-avatar-id="${avatarId}"]`;
+      const avatar = document.querySelector(selector);
       if (!avatar) return;
 
-      // Handle both string URLs and Parse File objects
-      const imageUrl = typeof src === 'string'
-        ? src
-        : (src && src.url ? src.url : null);
+      const imageUrl = getProfilePictureUrl(src) || (typeof src === 'string' ? src : null);
 
       if (!imageUrl) {
         avatar.classList.remove('loading');
@@ -2134,21 +2296,27 @@
         return;
       }
 
+      avatar.querySelectorAll('img').forEach(el => el.remove());
       const img = document.createElement('img');
-      img.crossOrigin = 'anonymous'; // consistent with canvas draws to avoid cache poisoning
-      img.src = imageUrl;
       img.alt = username;
-
-      img.onload = () => {
-        avatar.classList.remove('loading');
-        img.classList.add('loaded');
-        avatar.appendChild(img);
+      avatar.appendChild(img);
+      const checkStale = () => {
+        if (expectedUserId && avatar.getAttribute('data-user-id') !== expectedUserId) return true;
+        return false;
       };
-
-      img.onerror = () => {
-        avatar.classList.remove('loading');
-        avatar.textContent = getInitials(username);
-      };
+      loadImageWithBlobFallback(img, imageUrl,
+        () => {
+          if (checkStale()) return;
+          avatar.classList.remove('loading');
+          img.classList.add('loaded');
+        },
+        () => {
+          if (checkStale()) return;
+          avatar.classList.remove('loading');
+          avatar.textContent = getInitials(username);
+        },
+        { forCanvas: false }
+      );
     }
 
     function highlightText(text, query) {
@@ -2184,31 +2352,33 @@
       const dropdown = document.getElementById('search-dropdown');
       const searchInput = document.querySelector('#search input');
 
-      // Close dropdown
       dropdown.classList.remove('visible');
       searchInput.value = '';
 
-      // If user is not in universe, add them
+      let indexToFlash = -1;
       if (result.isNew) {
         console.log('Adding new user to universe:', result.member.username);
-        await addMemberToUniverse(result.member);
+        indexToFlash = await addMemberToUniverse(result.member);
       } else {
-        // Backfill profile picture from fresh search data into pointMetadata
-        // (metadata may have been written before the proPic user record was loaded)
         if (result.index >= 0 && result.index < pointMetadata.length) {
           const meta = pointMetadata[result.index];
           if (meta && !meta.profilePicture && result.member.profilePicture) {
             meta.profilePicture = result.member.profilePicture;
           }
         }
-        flashPoint(result.index);
+        indexToFlash = result.index;
+      }
+      if (indexToFlash >= 0 && pointMetadata[indexToFlash]) {
+        flashPoint(indexToFlash);
+      } else if (result.isNew) {
+        console.warn('[Search] Universe not ready — could not add user. Try again after the scene has loaded.');
       }
     }
 
     async function addMemberToUniverse(member) {
       if (!points || !points.geometry) {
-        console.error('Points not initialized');
-        return;
+        console.warn('[Search] Points not initialized — cannot add user to universe yet.');
+        return undefined;
       }
 
       // Generate random position in the universe
@@ -2287,10 +2457,8 @@
       memberIndexMap.set(member.id, newIndex);
       loadedMemberIds.add(member.id);
 
-      // Zoom to new member
-      flashPoint(newIndex);
-
       console.log(`Added ${member.username} at index ${newIndex}`);
+      return newIndex;
     }
 
     function timeAgo(iso) {
@@ -2562,9 +2730,9 @@
         });
       }
 
-      // Fire planet image fetches in batches — 4 at a time, next batch starts after
-      // previous completes. Initial 120ms delay lets profile pic win the connection pool.
+      // Planet image batches: start after profile picture has had time to load (prioritize profile pic).
       const BATCH_SIZE = 4;
+      const PLANET_IMAGE_DELAY_MS = 450;
       function _runImageBatch(startIdx) {
         if (startIdx >= deferredImageLoads.length) return;
         const batch = deferredImageLoads.slice(startIdx, startIdx + BATCH_SIZE);
@@ -2614,20 +2782,24 @@
             onDone();
           };
 
-          // Fetch via blob to force image MIME type — handles files stored with wrong
-          // extensions (e.g. _image.txt served as text/plain) that browsers won't load
-          // as <img> elements directly. Blob URLs are same-origin so no canvas taint.
+          // Fetch via blob to force image MIME type — handles wrong extensions (e.g. _image.txt)
           fetch(imgUrl, { mode: 'cors' })
             .then(r => r.ok ? r.blob() : Promise.reject(r.status))
             .then(blob => {
-              const objectUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
               const img = new Image();
-              img.onload = () => drawToSprite(img, objectUrl);
-              img.onerror = () => { URL.revokeObjectURL(objectUrl); onDone(); };
-              img.src = objectUrl;
+              function tryType(mime) {
+                const objectUrl = URL.createObjectURL(new Blob([blob], { type: mime }));
+                img.onload = () => drawToSprite(img, objectUrl);
+                img.onerror = () => {
+                  URL.revokeObjectURL(objectUrl);
+                  if (mime === 'image/jpeg') tryType('image/png');
+                  else onDone();
+                };
+                img.src = objectUrl;
+              }
+              tryType('image/jpeg');
             })
             .catch(() => {
-              // fetch failed — try direct img.src as last resort
               const img = new Image();
               img.crossOrigin = 'anonymous';
               img.onload = () => drawToSprite(img, null);
@@ -2636,7 +2808,7 @@
             });
         });
       }
-      setTimeout(() => _runImageBatch(0), 120);
+      setTimeout(() => _runImageBatch(0), PLANET_IMAGE_DELAY_MS);
     }
 
     let _loadingPostsForUser = null; // guard against concurrent fetches for same user
@@ -2801,18 +2973,24 @@
         }
 
         if (mediaUrl) {
-          // Fetch via blob to force image MIME type — handles files stored with wrong
-          // extensions (e.g. _image.txt served as text/plain)
           fetch(mediaUrl, { mode: 'cors' })
             .then(r => r.ok ? r.blob() : Promise.reject(r.status))
             .then(blob => {
-              const objectUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
-              const prev = imageEl._blobUrl;
-              if (prev) URL.revokeObjectURL(prev);
-              imageEl._blobUrl = objectUrl;
-              imageEl.src = objectUrl;
+              function tryType(mime) {
+                const objectUrl = URL.createObjectURL(new Blob([blob], { type: mime }));
+                const prev = imageEl._blobUrl;
+                if (prev) URL.revokeObjectURL(prev);
+                imageEl._blobUrl = objectUrl;
+                imageEl.onerror = () => {
+                  URL.revokeObjectURL(objectUrl);
+                  if (mime === 'image/jpeg') tryType('image/png');
+                  else imageEl.src = mediaUrl;
+                };
+                imageEl.src = objectUrl;
+              }
+              tryType('image/jpeg');
             })
-            .catch(() => { imageEl.src = mediaUrl; }); // fallback to direct URL
+            .catch(() => { imageEl.src = mediaUrl; });
           imageEl.style.display = 'block';
         } else {
           imageEl.style.display = 'none';
@@ -2965,25 +3143,27 @@
 
     // Helper: fill a supporter card bg element with a profile image (or leave initials)
     function _setSupporterCardBgImage(bg, imageUrl, username) {
-      // Clear existing content
       bg.innerHTML = '';
+      const initials = (username.replace(/^@/,'').slice(0,2)).toUpperCase();
       if (imageUrl) {
         const img = document.createElement('img');
-        img.crossOrigin = 'anonymous'; // consistent with canvas loads to avoid cache poisoning
         img.alt = username;
-        img.onerror = () => {
-          img.remove();
-          const initDiv = document.createElement('div');
-          initDiv.className = 'supporter-card-initials';
-          initDiv.textContent = (username.replace(/^@/,'').slice(0,2)).toUpperCase();
-          bg.appendChild(initDiv);
-        };
-        img.src = imageUrl;
         bg.appendChild(img);
+        loadImageWithBlobFallback(img, imageUrl,
+          () => {},
+          () => {
+            img.remove();
+            const initDiv = document.createElement('div');
+            initDiv.className = 'supporter-card-initials';
+            initDiv.textContent = initials;
+            bg.appendChild(initDiv);
+          },
+          { forCanvas: false }
+        );
       } else {
         const initDiv = document.createElement('div');
         initDiv.className = 'supporter-card-initials';
-        initDiv.textContent = (username.replace(/^@/,'').slice(0,2)).toUpperCase();
+        initDiv.textContent = initials;
         bg.appendChild(initDiv);
       }
     }
@@ -3024,9 +3204,7 @@
       sorted.forEach(([targetId, count], i) => {
         const meta = pointMetadata[memberIndexMap.get(targetId)];
         const username = meta ? (meta.username || meta.id) : targetId;
-        const imageUrl = meta && meta.profilePicture
-          ? (typeof meta.profilePicture === 'string' ? meta.profilePicture : (meta.profilePicture.url || null))
-          : null;
+        const imageUrl = meta ? getProfilePictureUrl(meta.profilePicture) : null;
 
         const layout = layouts[i] || layouts[0];
 
@@ -3074,24 +3252,21 @@
         const missingIds = needsFetch.map(e => e.targetId);
         const params = new URLSearchParams({
           where: JSON.stringify({ objectId: { $in: missingIds } }),
-          keys: 'objectId,username,proPic',
+          keys: 'objectId,username,proPic,profilePicture',
           limit: String(missingIds.length),
         });
         fetch(`https://parseapi.back4app.com/classes/_User?${params}`, {
           headers: {
-            'X-Parse-Application-Id': 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by',
+            'X-Parse-Application-Id': B4A_APP_ID,
             'X-Parse-REST-API-Key': 'rNXb9qIR6wrZ3n81OG33HVQkpPsXANUatiOE5HSq',
           }
         })
         .then(r => r.json())
         .then(data => {
           if (!data.results) return;
-          // Build a map of objectId → proPic URL
           const picMap = {};
           data.results.forEach(u => {
-            let url = null;
-            if (typeof u.proPic === 'string') url = u.proPic;
-            else if (u.proPic && u.proPic.url) url = u.proPic.url;
+            const url = getProfilePictureUrl(u.proPic || u.profilePicture);
             if (url) picMap[u.objectId] = url;
           });
           // Update metadata + swap card bg images
@@ -3924,7 +4099,7 @@
     // exactly where we left off, only fetching members we don't have yet.
 
     const SNAPSHOT_KEY = 'universeSnapshot';
-    const SNAPSHOT_VERSION = 3; // bumped — forces fresh proPic load (back4app.js stub fix)
+    const SNAPSHOT_VERSION = 4; // bumped — invalidate old snapshot so profile pictures re-load from API
 
     function loadSnapshot() {
       try {

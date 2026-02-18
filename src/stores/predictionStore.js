@@ -1,11 +1,11 @@
 /**
  * Zustand store for prediction overlay mode.
- * v2: Supports learned logistic regression model and risk-driven layout.
+ * Supports learned logistic regression model and risk-driven layout.
  */
 import { create } from 'zustand';
 import { computePredictions, labelOutcomes, extractFeatures, computeCohortStats, getCohortStatsForMember, trainLogisticRegression, DEFAULT_MODEL, setThresholds } from '../../lib/predictions.js';
 import { computeRiskLayout, blendLayouts } from '../../lib/riskLayout.js';
-import { useUniverseStore, setPredictionStoreGetter } from './universeStore-v2.js';
+import { useUniverseStore, setPredictionStoreGetter } from './universeStore.js';
 
 export const usePredictionStore = create((set, get) => ({
   // --- Prediction mode ---
@@ -183,7 +183,7 @@ export const usePredictionStore = create((set, get) => ({
         f1: Math.round(f1 * 1000) / 1000,
         fpr: Math.round(fpr * 1000) / 1000,
         specificity: Math.round(specificity * 1000) / 1000,
-        modelType: model ? 'learned (v2)' : 'heuristic (v1)',
+        modelType: model ? 'learned' : 'heuristic',
       },
     });
 

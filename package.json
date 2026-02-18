@@ -5,9 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:v2": "vite --mode v2",
     "build": "vite build",
-    "build:v2": "vite build --mode v2",
     "preview": "vite preview",
     "training": "node training/run.js",
     "training:recent": "node training/run.js --recent",

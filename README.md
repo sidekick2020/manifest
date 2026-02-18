@@ -8,7 +8,7 @@
 
 ## Launching the app
 
-The current working version is a single self-contained HTML file. No build step required.
+**Source of truth:** `test-point-cloud.html` — the single self-contained app. No build step required.
 
 ### Option 1 — Vite dev server (recommended)
 
@@ -41,6 +41,40 @@ Double-click `test-point-cloud.html` or drag it into Chrome.
 
 ---
 
+## Deploy
+
+The app is a static frontend. Build once, then deploy the `dist/` folder to any static host.
+
+### Build
+
+```bash
+npm install
+npm run build
+```
+
+Output is in **`dist/`**. The main app is at **`dist/test-point-cloud.html`** (and linked from `/` via redirect on supported hosts).
+
+### Deploy to Vercel (recommended)
+
+1. Push this repo to GitHub.
+2. Go to [vercel.com](https://vercel.com) → **Add New** → **Project** → import your repo.
+3. Leave **Build Command** as `npm run build` and **Output Directory** as `dist` (or rely on `vercel.json`).
+4. Deploy. Root URL will serve the point-cloud app.
+
+### Deploy to Netlify
+
+1. Push to GitHub, then [netlify.com](https://netlify.com) → **Add new site** → **Import from Git**.
+2. Build command: `npm run build`, Publish directory: `dist`.
+3. Deploy. `netlify.toml` is already set so `/` serves the app.
+
+### Other hosts
+
+Upload the contents of `dist/` to any static host (GitHub Pages, Cloudflare Pages, S3 + CloudFront, etc.). Open **`/test-point-cloud.html`** directly, or configure a redirect from `/` to that file.
+
+> **Back4App:** The app calls `parseapi.back4app.com` from the browser. If your host’s domain is not allowed by Back4App CORS, configure the allowed origins in your Back4App dashboard or use a small server/proxy for the Parse API.
+
+---
+
 ## What you'll see
 
 | Element | Represents |
@@ -69,7 +103,7 @@ Double-click `test-point-cloud.html` or drag it into Chrome.
 ## Project structure
 
 ```
-test-point-cloud.html   ← Main app (single file, self-contained)
+test-point-cloud.html   ← App (source of truth, single file, self-contained)
 lib/                    ← Shared JS modules
   back4app.js           ← Back4App REST client
   codec.js              ← Spatial hash encode/evolve

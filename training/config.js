@@ -4,11 +4,11 @@
  * Back4App has ~688K users, ~378K posts, ~2M comments spanning 7 years.
  * We load aggressively to get enough sobriety resets for meaningful metrics.
  *
- * v2: Default to --recent (newest data first) since recent data has far
+ * Default to --recent (newest data first) since recent data has far
  * more SoberDateChange ground-truth records. The first few thousand users
  * (2019-era) have very sparse relapse data.
  *
- * Pass --oldest to load oldest data first (original behavior).
+ * Pass --oldest to load oldest data first.
  */
 const oldest = process.argv.includes('--oldest');
 const recent = !oldest; // Default to recent now

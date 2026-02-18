@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Training pipeline v2: load Back4App data, train logistic regression,
+ * Training pipeline: load Back4App data, train logistic regression,
  * compute rolling-window validation, run evolution sessions, compute all metrics.
  *
- * New in v2:
+ * Features:
  *   - Default to recent data (more SoberDateChange ground truth)
  *   - Trains a logistic regression model with class balancing
  *   - Rolling-window temporal validation (multiple eval points)
@@ -166,7 +166,7 @@ function rollingWindowValidation(state, model, opts = {}) {
 
 async function main() {
   const dataEra = config.recent ? 'MOST RECENT (newest first)' : 'EARLIEST (oldest first)';
-  console.log(`Manifest training v2 — learned logistic regression + risk layout`);
+  console.log(`Manifest training — learned logistic regression + risk layout`);
   console.log(`Data loading order: ${dataEra}\n`);
 
   console.log('Loading data from Back4App...');
@@ -323,7 +323,7 @@ async function main() {
   }
 
   // Also run heuristic for comparison
-  console.log('\n  Heuristic model (v1) comparison:');
+  console.log('\n  Heuristic model comparison:');
   const heuristicMetrics = predictionAccuracy(state, { model: null });
   console.log(`    Precision: ${heuristicMetrics.precision}`);
   console.log(`    Recall: ${heuristicMetrics.recall}`);
@@ -482,7 +482,7 @@ async function main() {
       prCurve: predMetrics.prCurve,
       featurePrevalence: predMetrics.featurePrevalence,
     },
-    // Heuristic (v1) comparison
+    // Heuristic comparison
     heuristicModelMetrics: {
       precision: heuristicMetrics.precision,
       recall: heuristicMetrics.recall,
@@ -534,12 +534,12 @@ async function main() {
   console.log(`  Data: ${state.members.size} members, ${state.posts.size} posts, ${state.comments.size} comments, ${sdcCount} SDCs`);
   console.log(`  Relapse base rate: ${predMetrics.baseRate} (${predMetrics.relapseCount}/${predMetrics.labeledCount})`);
   console.log('');
-  console.log('  LEARNED MODEL (v2):');
+  console.log('  LEARNED MODEL:');
   console.log(`    P=${predMetrics.precision} R=${predMetrics.recall} F1=${predMetrics.f1} FPR=${predMetrics.fpr}`);
   console.log(`    TP=${predMetrics.tp} FP=${predMetrics.fp} FN=${predMetrics.fn} TN=${predMetrics.tn}`);
   console.log(`    Lift@top50: ${predMetrics.liftByK?.find(l => l.k === 50)?.lift || '—'}x`);
   console.log('');
-  console.log('  HEURISTIC MODEL (v1):');
+  console.log('  HEURISTIC MODEL:');
   console.log(`    P=${heuristicMetrics.precision} R=${heuristicMetrics.recall} F1=${heuristicMetrics.f1} FPR=${heuristicMetrics.fpr}`);
   console.log('');
   const improvement = predMetrics.f1 - heuristicMetrics.f1;
