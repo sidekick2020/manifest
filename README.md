@@ -12,12 +12,14 @@
 
 ### Option 1 — Vite dev server (recommended)
 
+From the project root (e.g. Cursor terminal with this folder as cwd):
+
 ```bash
 npm install
 npm run dev
 ```
 
-Then open **`http://localhost:5173/test-point-cloud.html`** in your browser.
+Then open **`http://localhost:5173/`** or **`http://localhost:5173/test-point-cloud.html`** in your browser. The root `/` redirects to the app.
 
 > If port 5173 is taken, Vite will pick the next available port (5174, 5175, …). Check the terminal output for the exact URL.
 
