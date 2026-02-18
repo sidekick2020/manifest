@@ -791,6 +791,30 @@
       transform: translateY(-2px);
       box-shadow: var(--shadow-button);
     }
+    /* Bottom controls suggestions — hides after first use */
+    #controls-suggestions {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 90;
+      padding: 10px 20px;
+      background: var(--color-bg-panel);
+      border: 1px solid var(--color-border-light);
+      border-radius: 24px;
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+      white-space: nowrap;
+      backdrop-filter: blur(12px);
+      box-shadow: var(--shadow-panel);
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      pointer-events: none;
+    }
+    #controls-suggestions.hidden {
+      opacity: 0;
+      transform: translateX(-50%) translateY(12px);
+      pointer-events: none;
+    }
     #admin-sidebar {
       position: fixed;
       top: 0;
@@ -1056,6 +1080,8 @@
     <button onclick="toggleHelp()">Got it!</button>
   </div>
 
+  <div id="controls-suggestions">Drag to rotate · Scroll to zoom · Click points for details</div>
+
   <button id="help-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
   <script type="importmap">
@@ -1149,6 +1175,23 @@
 
       // When URL hash changes (e.g. back/forward or manual edit), select that user if in universe
       window.addEventListener('hashchange', applyUserFromUrl);
+
+      // Bottom controls suggestions: hide when user starts using controls
+      function dismissControlsSuggestions() {
+        const el = document.getElementById('controls-suggestions');
+        if (!el || el.classList.contains('hidden')) return;
+        el.classList.add('hidden');
+        try { sessionStorage.setItem('controlsSuggestionsDismissed', '1'); } catch (e) {}
+        controls.removeEventListener('start', dismissControlsSuggestions);
+      }
+      if (!sessionStorage.getItem('controlsSuggestionsDismissed')) {
+        controls.addEventListener('start', dismissControlsSuggestions);
+        renderer.domElement.addEventListener('wheel', dismissControlsSuggestions, { once: true });
+        renderer.domElement.addEventListener('click', dismissControlsSuggestions, { once: true });
+      } else {
+        const el = document.getElementById('controls-suggestions');
+        if (el) el.classList.add('hidden');
+      }
     }
 
     // Store point metadata for interaction
@@ -1674,6 +1717,7 @@
         detailEl.classList.add('content-transitioning');
       }
 
+      const prevIndex = selectedMemberIndex;
       selectedMemberIndex = index;
 
       // Update shader uniform for selection halo
@@ -1880,17 +1924,17 @@
         positions[index * 3 + 2]
       );
 
-      // Skip zoom if camera is already close to this star (within 12 world units)
+      // Skip zoom only when re-selecting the same star we're already viewing
       const distToTarget = camera.position.distanceTo(targetPos);
-      if (distToTarget <= 12) return; // already zoomed in — don't re-animate
+      if (prevIndex === index && distToTarget <= 12) return; // same star, already zoomed — don't re-animate
 
-      const endPos = targetPos.clone().add(new THREE.Vector3(1, 1, 5/3));  // 3x closer zoom
+      const endPos = targetPos.clone().add(new THREE.Vector3(3, 3, 5));
       const startPos = camera.position.clone();
       const startTarget = controls.target.clone();
 
       let t = 0;
       const animateZoom = () => {
-        t += 0.02;  // 50% slower (was 0.03)
+        t += 0.03;
         if (t > 1) t = 1;
 
         camera.position.lerpVectors(startPos, endPos, t);
