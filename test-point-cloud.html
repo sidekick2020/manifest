@@ -302,6 +302,9 @@
       opacity: 0.35;
       pointer-events: none;
     }
+    .detail-drag-handle {
+      display: none; /* shown only in mobile media query */
+    }
     #detail .close {
       position: absolute;
       top: 15px;
@@ -949,17 +952,57 @@
         padding: 10px 16px;
         font-size: var(--font-size-sm);
       }
+      /* Mobile: detail as bottom sheet — 1/3 screen by default, scroll up for full */
       #detail {
+        top: auto;
+        right: 0;
+        left: 0;
+        bottom: 0;
         width: 100%;
-        right: -100%;
         max-width: 100vw;
-        padding: 20px;
-        padding-top: calc(20px + env(safe-area-inset-top, 0px));
-        padding-right: calc(20px + env(safe-area-inset-right, 0px));
+        height: 33.33vh;
+        max-height: 33.33vh;
+        border-left: none;
+        border-top: 2px solid var(--color-accent);
+        border-top-left-radius: var(--border-radius-lg);
+        border-top-right-radius: var(--border-radius-lg);
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+        padding: 12px 20px 20px;
+        padding-top: 8px;
         padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+        padding-left: calc(20px + env(safe-area-inset-left, 0px));
+        padding-right: calc(20px + env(safe-area-inset-right, 0px));
+        transform: translateY(100%);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                    height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                    max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y;
       }
       #detail.visible {
-        right: 0;
+        transform: translateY(0);
+      }
+      /* Expanded: full height so user can scroll content; scroll down to collapse */
+      #detail.visible.detail-expanded {
+        height: 92vh;
+        max-height: 92vh;
+      }
+      /* Drag handle — visible only on mobile (same breakpoint as #detail bottom sheet) */
+      .detail-drag-handle {
+        display: block;
+        width: 40px;
+        height: 4px;
+        margin: 0 auto 12px;
+        background: rgba(255, 255, 255, 0.35);
+        border-radius: 2px;
+        flex-shrink: 0;
+        cursor: grab;
+        touch-action: none;
+      }
+      .detail-drag-handle:active {
+        cursor: grabbing;
       }
       #admin-sidebar {
         width: 100%;
@@ -1094,9 +1137,6 @@
 </head>
 <body>
   <div id="controls">
-    <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #666;">
-      <strong>Point Count</strong>
-    </div>
     <button onclick="generatePoints(10000)">10K Points</button>
     <button onclick="generatePoints(50000)">50K Points</button>
     <button onclick="generatePoints(100000)" class="active">100K Points</button>
@@ -1136,6 +1176,7 @@
   </div>
 
   <div id="detail">
+    <div id="detail-drag-handle" class="detail-drag-handle" aria-hidden="true"></div>
     <span class="close" onclick="closeDetail()">✕</span>
     <div class="detail-header">
       <div class="detail-avatar" id="detail-avatar">
@@ -2070,6 +2111,10 @@
         : (metadata.sobrietyDate || metadata.sobriety ? '< 1 day' : 'Not set');
 
       detailEl.classList.add('visible');
+      // Mobile bottom sheet: start at 1/3 height so user can scroll up for full details
+      if (window.innerWidth <= 768) {
+        detailEl.classList.remove('detail-expanded');
+      }
 
       // Update URL so this user can be revisited via the same link
       setUrlForUser(metadata.id);
@@ -2159,7 +2204,8 @@
     }
 
     window.closeDetail = () => {
-      document.getElementById('detail').classList.remove('visible');
+      const detailEl = document.getElementById('detail');
+      detailEl.classList.remove('visible', 'detail-expanded');
       selectedMemberIndex = null;
 
       // Clear user from URL so root URL shows no selection
@@ -2183,6 +2229,86 @@
       const suppSec = document.getElementById('supporters-section');
       if (suppSec) suppSec.style.display = 'none';
     };
+
+    function initDetailBottomSheet() {
+      const detailEl = document.getElementById('detail');
+      const handle = document.getElementById('detail-drag-handle');
+      if (!detailEl || !handle) return;
+      const MOBILE_BREAKPOINT = 768;
+      let dragStartY = 0;
+      let dragStartExpanded = false;
+      let dragDidExpand = false;
+      let dragDidCollapse = false;
+      let dragDidClose = false;
+
+      function isMobile() {
+        return window.innerWidth <= MOBILE_BREAKPOINT;
+      }
+
+      handle.addEventListener('pointerdown', (e) => {
+        if (!isMobile() || !detailEl.classList.contains('visible')) return;
+        e.preventDefault();
+        dragStartY = e.clientY;
+        dragStartExpanded = detailEl.classList.contains('detail-expanded');
+        dragDidExpand = false;
+        dragDidCollapse = false;
+        dragDidClose = false;
+        handle.setPointerCapture(e.pointerId);
+      });
+      handle.addEventListener('pointermove', (e) => {
+        if (!isMobile() || !detailEl.classList.contains('visible')) return;
+        const dy = e.clientY - dragStartY;
+        if (dragStartExpanded) {
+          if (dy > 30 && !dragDidCollapse) {
+            detailEl.classList.remove('detail-expanded');
+            dragDidCollapse = true;
+          }
+        } else {
+          if (dy < -25 && !dragDidExpand) {
+            detailEl.classList.add('detail-expanded');
+            dragDidExpand = true;
+          } else if (dy > 80 && !dragDidClose) {
+            closeDetail();
+            dragDidClose = true;
+          }
+        }
+      });
+      handle.addEventListener('pointerup', (e) => {
+        handle.releasePointerCapture(e.pointerId);
+      });
+
+      detailEl.addEventListener('scroll', () => {
+        if (!isMobile() || !detailEl.classList.contains('visible')) return;
+        if (detailEl.classList.contains('detail-expanded') && detailEl.scrollTop <= 0) {
+          detailEl.dataset.atTop = '1';
+        } else {
+          delete detailEl.dataset.atTop;
+        }
+        if (!detailEl.classList.contains('detail-expanded') && detailEl.scrollTop > 60) {
+          detailEl.classList.add('detail-expanded');
+        }
+      }, { passive: true });
+      detailEl.addEventListener('touchstart', (e) => {
+        if (!isMobile() || !detailEl.classList.contains('visible')) return;
+        detailEl.dataset.touchStartY = e.touches[0].clientY;
+        detailEl.dataset.touchStartScroll = String(detailEl.scrollTop);
+      }, { passive: true });
+      detailEl.addEventListener('touchmove', (e) => {
+        if (!isMobile() || !detailEl.classList.contains('visible')) return;
+        const atTop = detailEl.scrollTop <= 0;
+        const startY = Number(detailEl.dataset.touchStartY);
+        const dy = e.touches[0].clientY - startY;
+        if (detailEl.classList.contains('detail-expanded')) {
+          if (atTop && dy > 40) {
+            detailEl.classList.remove('detail-expanded');
+            detailEl.dataset.touchStartY = e.touches[0].clientY;
+          }
+        } else {
+          if (atTop && dy > 60) closeDetail();
+        }
+      }, { passive: true });
+    }
+    initDetailBottomSheet();
 
     let currentSearchResults = [];
     let selectedSearchIndex = -1;
