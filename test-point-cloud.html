@@ -3526,10 +3526,9 @@
 
         const mat = new THREE.SpriteMaterial({
           map:         texture,
-          transparent: false,
+          transparent: true,
           depthWrite:  false,
           depthTest:   false,
-          opacity:     1,
         });
         const sprite = new THREE.Sprite(mat);
         sprite.renderOrder = 10;
