@@ -1,6 +1,25 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { execSync } from 'child_process';
+
+// Derive a deterministic port from the git branch name so each branch
+// gets its own dev server — no port collisions or stale-cache conflicts.
+function branchPort() {
+  try {
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
+    let hash = 0;
+    for (let i = 0; i < branch.length; i++) {
+      hash = ((hash << 5) - hash + branch.charCodeAt(i)) | 0;
+    }
+    // Map to port range 3100–3999 (900 slots, well above ephemeral range)
+    return 3100 + (Math.abs(hash) % 900);
+  } catch {
+    return 5173; // fallback if not in a git repo
+  }
+}
+
+const port = branchPort();
 
 export default defineConfig({
   plugins: [
@@ -32,7 +51,8 @@ export default defineConfig({
     entries: ['./index.html', './test-point-cloud.html'],
   },
   server: {
-    port: 5173,
+    port,
+    strictPort: true, // fail instead of silently picking another port
     proxy: {
       '/parse-api': {
         target: 'https://parseapi.back4app.com',
