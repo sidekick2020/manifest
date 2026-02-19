@@ -109,7 +109,7 @@ export const useUniverseStore = create((set, get) => {
 
       // OPTIMIZATION: Auto-enable performance mode for large datasets
       if (s.members.size > 10000 && !s.performanceMode) {
-        console.log('🚀 Entering performance mode (10K+ members) - disabling expensive features');
+        console.log('Entering performance mode (10K+ members) - disabling expensive features');
         set({ performanceMode: true, status: 'performance mode enabled (10K+ members)' });
       }
 
@@ -140,9 +140,9 @@ export const useUniverseStore = create((set, get) => {
         if (s.members.size > 0 && s.animationEnabled) {
           const codecState = get()._codecState();
 
-          // CRITICAL OPTIMIZATION: Skip expensive evolution for large datasets
-          // Use simple deterministic positioning instead
-          if (s.members.size > 800) {
+          // Skip evolution for very large datasets (>5000 members).
+          // With pre-built indices, codec evolution is fast enough for up to 5000 members.
+          if (s.members.size > 5000) {
             // Simple sphere positioning for large datasets (instant, no computation)
             s.members.forEach((m, id) => {
               if (!s.targetPos.has(id)) {

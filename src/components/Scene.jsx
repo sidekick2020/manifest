@@ -8,6 +8,69 @@ import { Octree, getFrustumBounds } from '../../lib/octree.js';
 import { TemporalSlicer } from '../../lib/temporalSlicer.js';
 import { getLODTier, getCellSize } from '../../lib/SimpleLOD.js';
 
+// --- Pre-computed color lookup table (20 risk × 10 mass = 200 entries) ---
+// Eliminates ~4000 HSL string allocations per frame at 2000 members.
+const COLOR_RISK_STEPS = 20;
+const COLOR_MASS_STEPS = 10;
+const COLOR_TABLE = buildColorTable();
+
+function buildColorTable() {
+  const table = [];
+  for (let ri = 0; ri < COLOR_RISK_STEPS; ri++) {
+    const row = [];
+    const r = ri / COLOR_RISK_STEPS;
+    for (let mi = 0; mi <= COLOR_MASS_STEPS; mi++) {
+      const intensity = mi / COLOR_MASS_STEPS;
+      let hue, sat, light;
+      if (r < 0.3) {
+        hue = 60; sat = r * 50; light = 90 - r * 20;
+      } else if (r < 0.6) {
+        const t = (r - 0.3) / 0.3;
+        hue = 60 - t * 25; sat = 50 + t * 35; light = 70 - t * 10;
+      } else {
+        const t = (r - 0.6) / 0.4;
+        hue = 35 - t * 35; sat = 85 + t * 10; light = 60 - t * 10;
+      }
+      row.push({
+        glowColor: `hsla(${Math.round(hue)},${Math.round(sat)}%,${Math.round(light)}%,0.3)`,
+        coreColor: `hsla(${Math.round(hue)},${Math.round(sat)}%,${Math.round(light)}%,1)`,
+      });
+    }
+    // Also store a default (non-risk) entry keyed by mass intensity
+    table.push(row);
+  }
+  // Default (no risk) colors indexed by mass intensity
+  const defaults = [];
+  for (let mi = 0; mi <= COLOR_MASS_STEPS; mi++) {
+    const intensity = mi / COLOR_MASS_STEPS;
+    const hue = 35 + intensity * 15;
+    const sat = 85;
+    const light = 60 + intensity * 25;
+    defaults.push({
+      glowColor: `hsla(${Math.round(hue)},${sat}%,${Math.round(55 + intensity * 30)}%,0.3)`,
+      coreColor: `hsla(${Math.round(hue)},${sat}%,${Math.round(light)}%,1)`,
+    });
+  }
+  table.defaults = defaults;
+  return table;
+}
+
+function lookupColor(risk, massIntensity, hasRisk) {
+  if (hasRisk) {
+    const ri = Math.min(COLOR_RISK_STEPS - 1, Math.floor(risk * COLOR_RISK_STEPS));
+    const mi = Math.min(COLOR_MASS_STEPS, Math.round(massIntensity * COLOR_MASS_STEPS));
+    return COLOR_TABLE[ri][mi];
+  }
+  const mi = Math.min(COLOR_MASS_STEPS, Math.round(massIntensity * COLOR_MASS_STEPS));
+  return COLOR_TABLE.defaults[mi];
+}
+
+// --- Project() object pool (ring buffer) ---
+// Eliminates ~2000 short-lived {x,y,z,s} allocations per frame.
+const PROJ_POOL_SIZE = 8192;
+const projPool = Array.from({ length: PROJ_POOL_SIZE }, () => ({ x: 0, y: 0, z: 0, s: 0 }));
+let projPoolIdx = 0;
+
 /**
  * Canvas 2D renderer — matches v6-live prototype rendering.
  * Manual 3D projection, glow effects, auto-zoom camera, click-to-select.
@@ -25,6 +88,9 @@ export function Scene() {
   const slicerRef = useRef(null);
   const sparklesRef = useRef([]); // Activity sparkles for visual feedback
   const lastCommentCountRef = useRef(0); // Track comment count changes
+  const lastOctreeRebuildRef = useRef(0); // Elapsed-time octree rebuild
+  const octreeMemberCountRef = useRef(0); // Cached count from last rebuild
+  const lodTierIndexRef = useRef(0); // LOD hysteresis state (moved from module-level)
 
   // Temporal slicing state - controls which time window to render
   const [sliceOptions, setSliceOptions] = useState({
@@ -36,7 +102,7 @@ export function Scene() {
   // Initialize octree once
   if (!octreeRef.current) {
     octreeRef.current = new Octree(
-      { min: { x: -200, y: -200, z: -200 }, max: { x: 200, y: 200, z: 200 } },
+      { min: { x: -300, y: -300, z: -300 }, max: { x: 300, y: 300, z: 300 } },
       16,  // capacity per node
       10   // max depth
     );
@@ -293,12 +359,19 @@ export function Scene() {
       const s = cam.d / (cam.d + z2 + cam.d);
       const zoom = BASE_D / Math.max(cam.d, 0.1);
       const sc = Math.min(canvas.width, canvas.height) * 0.009 * zoom;
-      return { x: canvas.width / 2 + x1 * sc * s, y: canvas.height / 2 - y1 * sc * s, z: z2, s: s * zoom };
+      // Reuse pooled object instead of allocating new one
+      const out = projPool[projPoolIdx++ & (PROJ_POOL_SIZE - 1)];
+      out.x = canvas.width / 2 + x1 * sc * s;
+      out.y = canvas.height / 2 - y1 * sc * s;
+      out.z = z2;
+      out.s = s * zoom;
+      return out;
     }
 
     function frame() {
       rafRef.current = requestAnimationFrame(frame);
       time = performance.now() * 0.001;
+      projPoolIdx = 0; // Reset project() object pool each frame
       const W = canvas.width, H = canvas.height;
       ctx.clearRect(0, 0, W, H);
 
@@ -512,31 +585,22 @@ export function Scene() {
         });
       }
 
-      // Rebuild octree periodically (not every frame - too expensive)
-      // Also rebuild when new members are added during initial load
-      const octreeStats = octree.getStats();
+      // Rebuild octree on timer (not every frame) or when member count changes
       const shouldRebuild =
-        octreeStats.memberCount === 0 || // First time
-        octreeStats.memberCount < memberPositions.length || // Members added
-        Math.floor(time * 10) % 30 === 0; // Periodic update
+        octreeMemberCountRef.current === 0 || // First time
+        octreeMemberCountRef.current < memberPositions.length || // Members added
+        (now - lastOctreeRebuildRef.current > 3000); // Every 3 seconds
 
       if (shouldRebuild && memberPositions.length > 0) {
         octree.rebuild(memberPositions);
-
-        // Validate rebuild succeeded
-        const stats = octree.getStats();
-        if (stats.memberCount !== memberPositions.length) {
-          console.warn('[Scene] Octree rebuild incomplete:', {
-            expectedMembers: memberPositions.length,
-            actualInOctree: stats.memberCount,
-            possibleCause: 'Members outside octree bounds'
-          });
-        }
+        octreeMemberCountRef.current = memberPositions.length;
+        lastOctreeRebuildRef.current = now;
       }
 
       // Query visible members using distance-per-node LOD
       const frustum = getFrustumBounds(cam, { width: W, height: H });
-      const lodInfo = getLODTier(cam.d);
+      const lodInfo = getLODTier(cam.d, lodTierIndexRef.current);
+      lodTierIndexRef.current = lodInfo.tierIndex;
       const cellSize = lodInfo.cellSize;
       // Use per-node distance LOD so closer octree nodes resolve at finer detail
       let visibleItems = octree.queryFrustumDistanceLOD(
@@ -732,12 +796,15 @@ export function Scene() {
         }
       }
 
-      items.sort((a, b) => a.z - b.z);
+      // Only z-sort for small scenes; large scenes use aggregation where z-order barely matters
+      if (items.length < 600) {
+        items.sort((a, b) => a.z - b.z);
+      }
       screenPosRef.current.clear();
 
       // Performance monitoring (log every 5 seconds)
       if (Math.floor(time) % 5 === 0 && Math.floor(time * 10) % 10 === 0) {
-        const visibleCount = visibleMembers ? visibleMembers.length : 0;
+        const visibleCount = visibleItems ? visibleItems.length : 0;
         const slicePercent = members.size > 0 ? Math.round((slicedMembers.size / members.size) * 100) : 0;
         const culledPercent = slicedMembers.size > 0 ? Math.round((1 - visibleCount / slicedMembers.size) * 100) : 0;
         console.log(`[Scene] Total: ${members.size}, Sliced: ${slicedMembers.size} (${slicePercent}%), Visible: ${visibleCount} (culled ${culledPercent}%)`);
@@ -793,27 +860,19 @@ export function Scene() {
             const radius = (1.0 + Math.min(item.mass, 6) * 0.05) * p.s * item.scale;
             const intensity = Math.min(1, item.mass / 6);
 
-            // Render the star core (same as individual member)
-            let hue = 35 + intensity * 15;
-            let sat = 85;
-            let light = 60 + intensity * 25;
-            if (item.riskLevel) {
-              const r = item.risk;
-              if (r < 0.3) { hue = 60; sat = r * 50; light = 90 - r * 20; }
-              else if (r < 0.6) { const t = (r - 0.3) / 0.3; hue = 60 - t * 25; sat = 50 + t * 35; light = 70 - t * 10; }
-              else { const t = (r - 0.6) / 0.4; hue = 35 - t * 35; sat = 85 + t * 10; light = 60 - t * 10; }
-            }
+            // Use pre-computed color lookup table
+            const colors = lookupColor(item.risk, intensity, !!item.riskLevel);
 
             // Glow
             ctx.globalAlpha = item.opacity * 0.15;
-            ctx.fillStyle = `hsla(${hue},${sat}%,${light}%,0.3)`;
+            ctx.fillStyle = colors.glowColor;
             ctx.beginPath();
             ctx.arc(p.x, p.y, radius * 1.5, 0, Math.PI * 2);
             ctx.fill();
 
             // Core
             ctx.globalAlpha = item.opacity;
-            ctx.fillStyle = item.sel ? 'rgb(39,197,206)' : `hsla(${hue},${sat}%,${light}%,1)`;
+            ctx.fillStyle = item.sel ? 'rgb(39,197,206)' : colors.coreColor;
             ctx.beginPath();
             ctx.arc(p.x, p.y, Math.max(1.2, radius), 0, Math.PI * 2);
             ctx.fill();
@@ -839,23 +898,14 @@ export function Scene() {
           // LOD: Render distant members as simple colored dots
           const p = project(item.pos, camTransform);
           if (p.s > 0 && p.z > -100) {
-            const radius = 1.5 * p.s; // Smaller radius for LOD
-
-            // Risk-based color (simplified)
-            const r = item.risk;
-            let hue, sat, light;
-            if (r < 0.3) {
-              hue = 60; sat = 20; light = 85;
-            } else if (r < 0.6) {
-              hue = 40; sat = 60; light = 65;
-            } else {
-              hue = 0; sat = 90; light = 55;
-            }
-
-            ctx.fillStyle = `hsla(${hue},${sat}%,${light}%,${item.opacity * 0.6})`;
+            const radius = 1.5 * p.s;
+            const colors = lookupColor(item.risk, 0.5, true);
+            ctx.globalAlpha = item.opacity * 0.6;
+            ctx.fillStyle = colors.coreColor;
             ctx.beginPath();
             ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
             ctx.fill();
+            ctx.globalAlpha = 1.0;
           }
         } else if (item.type === 'member') {
           const p = project(item.pos, camTransform);
@@ -873,45 +923,11 @@ export function Scene() {
             const radius = (1.0 + Math.min(item.mass, 6) * 0.05) * p.s * item.scale * breathMultiplier;
             const intensity = Math.min(1, item.mass / 6);
 
-            // Risk-based color: white (low risk) to red (high risk)
-            let hue, sat, light, glowColor, coreColor;
-            if (item.riskLevel) {
-              // Risk mode: interpolate from white to red based on risk score
-              const r = item.risk; // 0 = low risk, 1 = high risk
-              if (r < 0.3) {
-                // Low risk: white to light yellow
-                hue = 60;
-                sat = r * 50; // 0-15%
-                light = 90 - r * 20; // 90-84%
-                glowColor = `hsla(${hue},${sat}%,${light}%,${item.opacity * 0.3})`;
-                coreColor = `hsla(${hue},${sat}%,${light}%,${item.opacity})`;
-              } else if (r < 0.6) {
-                // Medium risk: yellow to orange
-                const t = (r - 0.3) / 0.3; // 0-1 within this range
-                hue = 60 - t * 25; // 60 to 35 (yellow to orange)
-                sat = 50 + t * 35; // 15 to 85%
-                light = 70 - t * 10; // 84 to 60%
-                glowColor = `hsla(${hue},${sat}%,${light}%,${item.opacity * 0.3})`;
-                coreColor = `hsla(${hue},${sat}%,${light}%,${item.opacity})`;
-              } else {
-                // High risk: orange to red
-                const t = (r - 0.6) / 0.4; // 0-1 within this range
-                hue = 35 - t * 35; // 35 to 0 (orange to red)
-                sat = 85 + t * 10; // 85 to 95%
-                light = 60 - t * 10; // 60 to 50%
-                glowColor = `hsla(${hue},${sat}%,${light}%,${item.opacity * 0.3})`;
-                coreColor = `hsla(${hue},${sat}%,${light}%,${item.opacity})`;
-              }
-            } else {
-              // Default mode: yellow/orange based on mass
-              hue = 35 + intensity * 15;
-              sat = 85;
-              light = 60 + intensity * 25;
-              glowColor = `hsla(${hue},${sat}%,${55 + intensity * 30}%,${item.opacity * 0.3})`;
-              coreColor = `hsla(${hue},${sat}%,${light}%,${item.opacity})`;
-            }
+            // Use pre-computed color lookup table (eliminates per-member HSL string construction)
+            const colors = lookupColor(item.risk, intensity, !!item.riskLevel);
+            const glowColor = colors.glowColor;
+            const coreColor = colors.coreColor;
 
-            // OPTIMIZATION: Use solid fills with globalAlpha instead of expensive gradients
             // Selection glow (smaller, reduced from 3.5x to 2.5x)
             if (item.sel) {
               ctx.globalAlpha = 0.15;
