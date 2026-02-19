@@ -6,7 +6,7 @@ import { seedToFloat } from '../../lib/codec.js';
 import { v3lerp } from '../../lib/vec3.js';
 import { Octree, getFrustumBounds } from '../../lib/octree.js';
 import { TemporalSlicer } from '../../lib/temporalSlicer.js';
-import { getCellSize } from '../../lib/SimpleLOD.js';
+import { getLODTier, getCellSize } from '../../lib/SimpleLOD.js';
 
 /**
  * Canvas 2D renderer — matches v6-live prototype rendering.
@@ -534,10 +534,16 @@ export function Scene() {
         }
       }
 
-      // Query only visible members using frustum culling + LOD
+      // Query visible members using distance-per-node LOD
       const frustum = getFrustumBounds(cam, { width: W, height: H });
-      const cellSize = getCellSize(cam.d);
-      let visibleItems = octree.queryFrustumLOD(frustum, cellSize);
+      const lodInfo = getLODTier(cam.d);
+      const cellSize = lodInfo.cellSize;
+      // Use per-node distance LOD so closer octree nodes resolve at finer detail
+      let visibleItems = octree.queryFrustumDistanceLOD(
+        frustum,
+        cam.focus,
+        (dist) => getCellSize(dist)
+      );
 
       // Fallback: if octree returns nothing but we have members, render all
       // This happens when members are still animating into position
@@ -548,7 +554,7 @@ export function Scene() {
         }
       }
 
-      // Render visible items (can be individual members or aggregates)
+      // Render visible items (can be individual, representative, or aggregate)
       for (const item of visibleItems) {
         // Handle aggregates
         if (item.type === 'aggregate') {
@@ -559,10 +565,37 @@ export function Scene() {
               type: 'aggregate',
               pos: item.position,
               count: item.count,
-              opacity: 1,
+              opacity: item.opacity ?? 1,
               z: item.position.z,
+              memberIds: item.memberIds,
+              blendFactor: lodInfo.blendFactor,
             });
           }
+          continue;
+        }
+
+        // Handle representative tier: top member + count badge
+        if (item.type === 'representative') {
+          const m = slicedMembers.get(item.id);
+          if (!m) continue;
+          const pos = m.position || item.position;
+          const predData = predCache.get(item.id);
+          items.push({
+            type: 'representative',
+            id: item.id,
+            pos,
+            mass: m.mass || 1,
+            opacity: item.opacity ?? 0.9,
+            scale: m.scale || 1,
+            z: pos.z,
+            sel: item.id === selectedMember,
+            username: m.username,
+            proPic: m.proPic || null,
+            riskLevel: predData?.riskLevel || null,
+            risk: predData?.risk || 0,
+            count: item.count,
+            blendFactor: lodInfo.blendFactor,
+          });
           continue;
         }
 
@@ -736,8 +769,9 @@ export function Scene() {
               screenPosRef.current.set(representativeId, { x: p.x, y: p.y, memberIds: item.memberIds, aggPos: item.pos });
             }
 
-            // Blue cluster color
-            ctx.fillStyle = `rgba(100, 150, 255, ${item.opacity * 0.6})`;
+            // Blue cluster color — fade in with blendFactor during LOD transition
+            const aggAlpha = item.opacity * (0.4 + (item.blendFactor || 0) * 0.2);
+            ctx.fillStyle = `rgba(100, 150, 255, ${aggAlpha})`;
             ctx.beginPath();
             ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -749,6 +783,56 @@ export function Scene() {
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               ctx.fillText(item.count.toString(), p.x, p.y);
+            }
+          }
+        } else if (item.type === 'representative') {
+          // LOD: Representative tier — show top member of small cluster with count badge
+          const p = project(item.pos, camTransform);
+          if (p.s > 0 && p.z > -100) {
+            screenPosRef.current.set(item.id, { x: p.x, y: p.y });
+            const radius = (1.0 + Math.min(item.mass, 6) * 0.05) * p.s * item.scale;
+            const intensity = Math.min(1, item.mass / 6);
+
+            // Render the star core (same as individual member)
+            let hue = 35 + intensity * 15;
+            let sat = 85;
+            let light = 60 + intensity * 25;
+            if (item.riskLevel) {
+              const r = item.risk;
+              if (r < 0.3) { hue = 60; sat = r * 50; light = 90 - r * 20; }
+              else if (r < 0.6) { const t = (r - 0.3) / 0.3; hue = 60 - t * 25; sat = 50 + t * 35; light = 70 - t * 10; }
+              else { const t = (r - 0.6) / 0.4; hue = 35 - t * 35; sat = 85 + t * 10; light = 60 - t * 10; }
+            }
+
+            // Glow
+            ctx.globalAlpha = item.opacity * 0.15;
+            ctx.fillStyle = `hsla(${hue},${sat}%,${light}%,0.3)`;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, radius * 1.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Core
+            ctx.globalAlpha = item.opacity;
+            ctx.fillStyle = item.sel ? 'rgb(39,197,206)' : `hsla(${hue},${sat}%,${light}%,1)`;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, Math.max(1.2, radius), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
+
+            // Count badge — small number indicating cluster size
+            if (item.count > 1) {
+              const badgeX = p.x + radius + 3;
+              const badgeY = p.y - radius - 1;
+              const badgeR = 5;
+              ctx.fillStyle = 'rgba(100,150,255,0.85)';
+              ctx.beginPath();
+              ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = '#fff';
+              ctx.font = '8px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(String(item.count), badgeX, badgeY);
             }
           }
         } else if (item.type === 'member-lod') {
