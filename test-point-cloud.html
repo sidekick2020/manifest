@@ -2079,10 +2079,11 @@
 
     /** URL is path-based: / for root, /username for a user. No hash or test-point-cloud in path. */
     function getSlugFromUrl() {
-      const path = location.pathname.replace(/^\//, '').split('/')[0] || '';
+      const path = (location.pathname.replace(/^\//, '').split('/')[0] || '').trim();
       if (!path || path === 'test-point-cloud.html' || path === 'index.html') return null;
       try {
-        return decodeURIComponent(path) || null;
+        const decoded = (decodeURIComponent(path) || '').trim();
+        return decoded || null;
       } catch (_) {
         return path || null;
       }
@@ -2091,10 +2092,18 @@
     /** Resolve URL slug (id or username, case-insensitive) to member index, or undefined. */
     function getMemberIndexFromSlug(slug) {
       if (!slug) return undefined;
-      const decoded = decodeURIComponent(slug).trim();
-      const byId = memberIndexMap.get(decoded);
+      const raw = (typeof slug === 'string' ? slug : String(slug)).trim();
+      if (!raw) return undefined;
+      let normalized;
+      try {
+        normalized = decodeURIComponent(raw).trim() || raw;
+      } catch (_) {
+        normalized = raw;
+      }
+      if (!normalized) return undefined;
+      const byId = memberIndexMap.get(normalized);
       if (byId !== undefined) return byId;
-      const byUsername = usernameToIndexMap.get(decoded.toLowerCase());
+      const byUsername = usernameToIndexMap.get(normalized.toLowerCase());
       return byUsername;
     }
 
@@ -2110,16 +2119,24 @@
       }
     }
 
+    /** True if str can be used in URL path without percent-encoding (no spaces, emojis, etc.). */
+    function isUrlSafeSlug(str) {
+      if (!str || typeof str !== 'string') return false;
+      const s = String(str).trim();
+      return s.length > 0 && encodeURIComponent(s) === s;
+    }
+
     function setUrlForUser(userId, username) {
       const root = '/';
       if (!userId) {
         history.replaceState(null, '', root + location.search);
         return;
       }
-      const raw = (username && username !== 'Anonymous' && !/^User\d+$/i.test(String(username)))
-        ? username
-        : userId;
-      const slug = String(raw).trim();
+      let slug = userId;
+      const name = username && username !== 'Anonymous' && !/^User\d+$/i.test(String(username))
+        ? String(username).trim()
+        : '';
+      if (name && isUrlSafeSlug(name)) slug = name;
       history.replaceState(null, '', root + encodeURIComponent(slug) + location.search);
     }
 
@@ -2671,7 +2688,8 @@
 
     // Actual search function (will be debounced)
     async function performSearch(query, dropdown) {
-      const queryLower = query.toLowerCase();
+      const queryLower = String(query || '').trim().toLowerCase();
+      if (!queryLower) return;
 
       // Check cache first (version must match so we don't use stale profile picture shape)
       const cacheKey = queryLower;

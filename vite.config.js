@@ -11,8 +11,9 @@ export default defineConfig({
         server.middlewares.use((req, res, next) => {
           const path = req.url?.split('?')[0] || '';
           const isRoot = path === '/' || path === '';
+          const isViteInternal = path.startsWith('/@') || path.startsWith('/node_modules/');
           const isPathRoute = path.startsWith('/') && !path.includes('.') && path !== '/parse-api' && path.indexOf('/parsefiles-proxy') !== 0;
-          if (isRoot || isPathRoute) req.url = '/test-point-cloud.html';
+          if ((isRoot || isPathRoute) && !isViteInternal) req.url = '/test-point-cloud.html';
           next();
         });
       },
