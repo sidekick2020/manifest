@@ -60,17 +60,6 @@
     canvas {
       display: block;
     }
-    #controls {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      color: #fff;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 10px;
-      border-radius: 5px;
-      z-index: 100;
-      max-width: 200px;
-    }
     button {
       margin: 5px 0;
       padding: 8px 16px;
@@ -280,6 +269,7 @@
       top: 0;
       right: -500px; /* Hidden off-screen (width + padding + shadow) */
       width: 400px;
+      max-width: 33.333vw;
       height: 100vh;
       background: var(--color-bg-panel);
       border-left: 2px solid var(--color-accent);
@@ -917,19 +907,6 @@
 
     /* ——— Mobile & small screens ——— */
     @media (max-width: 768px) {
-      #controls {
-        top: auto;
-        right: 10px;
-        bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-        left: 10px;
-        max-width: none;
-        width: auto;
-        max-height: 42vh;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        padding: 12px;
-        border-radius: var(--border-radius-md);
-      }
       #search {
         top: calc(12px + env(safe-area-inset-top, 0px));
         left: 12px;
@@ -1061,7 +1038,7 @@
       #controls-suggestions {
         left: 12px;
         right: 12px;
-        bottom: calc(42vh + 16px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(24px + env(safe-area-inset-bottom, 0px));
         transform: none;
         width: auto;
         max-width: none;
@@ -1103,18 +1080,11 @@
     }
 
     @media (max-width: 480px) {
-      #controls {
-        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-        left: 8px;
-        right: 8px;
-        max-height: 38vh;
-        padding: 10px;
-      }
       #controls-suggestions {
-        bottom: calc(38vh + 12px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(24px + env(safe-area-inset-bottom, 0px));
       }
       #clear-connections-btn {
-        bottom: calc(38vh + 24px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(56px + env(safe-area-inset-bottom, 0px));
         left: 8px;
         right: 8px;
       }
@@ -1136,26 +1106,6 @@
   </style>
 </head>
 <body>
-  <div id="controls">
-    <button onclick="generatePoints(10000)">10K Points</button>
-    <button onclick="generatePoints(50000)">50K Points</button>
-    <button onclick="generatePoints(100000)" class="active">100K Points</button>
-    <button onclick="generatePoints(250000)">250K Points</button>
-    <button onclick="generatePoints(500000)">500K Points</button>
-    <button onclick="generatePoints(1000000)">1M Points</button>
-    <div style="margin: 10px 0; padding: 10px 0; border-top: 1px solid #666;">
-      <strong>Navigation</strong>
-    </div>
-    <button onclick="toggleRotation()">Toggle Auto-Rotate</button>
-    <button onclick="resetCamera()">Reset Camera</button>
-    <button onclick="focusOnCluster()">Focus Random Cluster</button>
-    <div style="margin-top: 10px; font-size: 11px; color: #888; line-height: 1.4;">
-      💡 Drag to rotate<br>
-      🔍 Scroll to zoom<br>
-      👆 Click points for info
-    </div>
-  </div>
-
   <button id="admin-toggle" onclick="toggleAdmin()" title="Admin Dashboard (A)">☰</button>
 
   <div id="search">
@@ -2080,9 +2030,10 @@
       document.getElementById('detail-username').textContent = `@${username}`;
       document.getElementById('detail-username-full').textContent = `@${username}`;
 
-      // Safely handle position display
-      if (metadata.position) {
-        document.getElementById('detail-pos').textContent = `(${metadata.position.x.toFixed(1)}, ${metadata.position.y.toFixed(1)}, ${metadata.position.z.toFixed(1)})`;
+      // Safely handle position display (position can be null or have null x/y/z from feed)
+      const pos = metadata.position;
+      if (pos && typeof pos.x === 'number' && typeof pos.y === 'number' && typeof pos.z === 'number') {
+        document.getElementById('detail-pos').textContent = `(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`;
       } else {
         document.getElementById('detail-pos').textContent = 'N/A';
       }
@@ -4121,13 +4072,6 @@
 
     window.generatePoints = (count) => {
       generatePoints(count);
-      // Update button states
-      document.querySelectorAll('#controls button').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.textContent.includes(count.toLocaleString())) {
-          btn.classList.add('active');
-        }
-      });
     };
 
     window.toggleRotation = () => {
@@ -4346,12 +4290,13 @@
           // Update metadata — preserve existing profilePicture and position
           // (member stubs created via posts/comments don't have proPic yet)
           const existingPic = pointMetadata[existingIndex]?.profilePicture || null;
-          const existingPos = pointMetadata[existingIndex]?.position || { x: 0, y: 0, z: 0 };
+          const prev = pointMetadata[existingIndex]?.position;
+          const ex = prev && typeof prev.x === 'number' ? prev : { x: 0, y: 0, z: 0 };
           pointMetadata[existingIndex] = {
             id,
             username: member.username || 'Anonymous',
             profilePicture: member.proPic || existingPic,
-            position: existingPos, // keep stable snapshot position
+            position: { x: ex.x, y: ex.y, z: ex.z },
             risk: (risk * 100).toFixed(0),
             riskLevel: risk < 0.33 ? 'low' : risk < 0.66 ? 'medium' : 'high',
             activity,
@@ -4361,9 +4306,12 @@
             cluster: 'Real Data',
           };
         } else {
-          // APPEND new member
-          const pos = member.position || { x: 0, y: 0, z: 0 };
-          newPositions.push(pos.x, pos.y, pos.z);
+          // APPEND new member (member.position can be null from back4app feed)
+          const p = member.position;
+          const px = p && typeof p.x === 'number' ? p.x : 0;
+          const py = p && typeof p.y === 'number' ? p.y : 0;
+          const pz = p && typeof p.z === 'number' ? p.z : 0;
+          newPositions.push(px, py, pz);
 
           const postCount = Array.from(state.posts.values()).filter(p => p.creator === id).length;
           const commentCount = Array.from(state.comments.values()).filter(c => c.fromMember === id).length;
@@ -4381,7 +4329,7 @@
             id,
             username: member.username || 'Anonymous',
             profilePicture: member.proPic || null,
-            position: { x: pos.x, y: pos.y, z: pos.z },
+            position: { x: px, y: py, z: pz },
             risk: (risk * 100).toFixed(0),
             riskLevel: risk < 0.33 ? 'low' : risk < 0.66 ? 'medium' : 'high',
             activity,
@@ -4505,6 +4453,20 @@
       }
     }
 
+    /** True if this snapshot looks like synthetic/fake data (e.g. from old generatePoints run). */
+    function isSyntheticSnapshot(snap) {
+      const members = snap?.members;
+      if (!members || members.length === 0) return false;
+      const sample = members.slice(0, Math.min(20, members.length));
+      const syntheticCount = sample.filter((m) => {
+        if (!m || typeof m !== 'object') return false;
+        const id = String(m.id || '');
+        const username = String(m.username || '');
+        return id.startsWith('member_') || /^User\d+$/i.test(username);
+      }).length;
+      return syntheticCount >= Math.min(5, sample.length);
+    }
+
     function saveSnapshot(skips) {
       // Serialize the current point cloud into a compact member array.
       if (!pointMetadata || pointMetadata.length === 0) return;
@@ -4514,9 +4476,9 @@
       const actArr = geo ? geo.attributes.activity.array : null;
 
       const members = pointMetadata.map((m, i) => {
-        const x = posArr ? posArr[i * 3]     : (m.position?.x ?? 0);
-        const y = posArr ? posArr[i * 3 + 1] : (m.position?.y ?? 0);
-        const z = posArr ? posArr[i * 3 + 2] : (m.position?.z ?? 0);
+        const x = posArr ? posArr[i * 3]     : (m?.position != null && typeof m.position.x === 'number' ? m.position.x : 0);
+        const y = posArr ? posArr[i * 3 + 1] : (m?.position != null && typeof m.position.y === 'number' ? m.position.y : 0);
+        const z = posArr ? posArr[i * 3 + 2] : (m?.position != null && typeof m.position.z === 'number' ? m.position.z : 0);
         return {
           id:            m.id,
           username:      m.username,
@@ -4547,7 +4509,9 @@
             id: m.id,
             username: m.username,
             proPic: m.proPic || null,
-            x: +m.x.toFixed(3), y: +m.y.toFixed(3), z: +m.z.toFixed(3),
+            x: +(Number(m.x) || 0).toFixed(3),
+            y: +(Number(m.y) || 0).toFixed(3),
+            z: +(Number(m.z) || 0).toFixed(3),
             size: +m.size.toFixed(2),
             activity: +m.activity.toFixed(3),
             sobrietyDays: m.sobrietyDays || 0,
@@ -4565,8 +4529,12 @@
 
     function restoreFromSnapshot(snap) {
       // Re-inflate point cloud from snapshot without any API call.
-      const members = snap.members;
-      if (!members || members.length === 0) return 0;
+      const raw = snap.members;
+      if (!raw || raw.length === 0) return 0;
+      // Filter out null/undefined entries (corrupted or old snapshot format)
+      const members = raw.filter((m) => m != null && (m.id != null || m.x != null || (m.position && (m.position.x != null || m.position.y != null || m.position.z != null))));
+
+      if (members.length === 0) return 0;
 
       const positions   = new Float32Array(members.length * 3);
       const colors      = new Float32Array(members.length * 3);
@@ -4574,35 +4542,46 @@
       const activities  = new Float32Array(members.length);
       const vertexIdxs  = new Float32Array(members.length);
 
+      // Support both top-level x,y,z and nested position: { x, y, z } (old snapshot format)
+      function getCoord(m, axis) {
+        const v = m[axis] ?? m.position?.[axis];
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      }
+
       members.forEach((m, i) => {
-        positions[i * 3]     = m.x;
-        positions[i * 3 + 1] = m.y;
-        positions[i * 3 + 2] = m.z;
+        const mx = getCoord(m, 'x');
+        const my = getCoord(m, 'y');
+        const mz = getCoord(m, 'z');
+        positions[i * 3]     = Number.isFinite(mx) ? mx : 0;
+        positions[i * 3 + 1] = Number.isFinite(my) ? my : 0;
+        positions[i * 3 + 2] = Number.isFinite(mz) ? mz : 0;
 
         // Recompute colour from activity (0=blue, 0.5=teal, 1=yellow) — fast approximation
-        const t = Math.min(m.activity * 5, 1);  // activity is 0–1 from geometry
+        const act = Number(m.activity);
+        const t = Math.min((Number.isFinite(act) ? act : 0) * 5, 1);
         colors[i * 3]     = t;
         colors[i * 3 + 1] = Math.min(t * 2, 1);
         colors[i * 3 + 2] = 1 - t;
 
-        sizes[i]        = m.size || 1;
-        activities[i]   = m.activity || 0;
+        sizes[i]        = (m.size != null && Number.isFinite(Number(m.size))) ? Number(m.size) : 1;
+        activities[i]   = Number.isFinite(act) ? act : 0;
         vertexIdxs[i]   = i;
 
         pointMetadata.push({
-          id:             m.id,
+          id:             m.id != null ? m.id : String(i),
           username:       m.username || 'Anonymous',
           profilePicture: m.proPic || null,
-          position:       { x: m.x, y: m.y, z: m.z },
+          position:       { x: positions[i * 3], y: positions[i * 3 + 1], z: positions[i * 3 + 2] },
           risk:           '50',
           riskLevel:      'medium',
-          activity:       m.activity || 0,
-          sobrietyDays:   m.sobrietyDays || 0,
+          activity:       Number.isFinite(act) ? act : 0,
+          sobrietyDays:   m.sobrietyDays != null ? Number(m.sobrietyDays) : 0,
           cluster:        'Snapshot',
         });
 
-        memberIndexMap.set(m.id, i);
-        loadedMemberIds.add(m.id);
+        memberIndexMap.set(m.id != null ? m.id : String(i), i);
+        loadedMemberIds.add(m.id != null ? m.id : String(i));
       });
 
       // Build geometry + material
@@ -4664,8 +4643,14 @@
 
       try {
         // 0. Try to restore from snapshot first (instant, no API calls)
-        const snap = loadSnapshot();
+        let snap = loadSnapshot();
         let skips;
+        if (snap && isSyntheticSnapshot(snap)) {
+          // Snapshot contains fake/synthetic data (e.g. from old generatePoints) — discard and load real data
+          localStorage.removeItem(SNAPSHOT_KEY);
+          localStorage.removeItem('universeJobState');
+          snap = null;
+        }
         if (snap && snap.skips) {
           skips = snap.skips;
           if (pointMetadata.length === 0) {
@@ -4679,6 +4664,12 @@
             document.getElementById('count').textContent = realCount.toLocaleString();
             updateJob(job.id, { message: `Restored ${restored.toLocaleString()} members from snapshot. Checking for new members...`, progress: 15 });
             applyUserFromUrl();
+            // If restore yielded 0 members (corrupt or wrong-format snapshot), clear snapshot and fall through to fresh load
+            if (restored === 0) {
+              localStorage.removeItem(SNAPSHOT_KEY);
+              skips = { userSkip: 0, postSkip: 0, commentSkip: 0, totalMembers: 0, isComplete: false };
+              localStorage.removeItem('universeJobState');
+            }
           }
         } else {
           // No snapshot — load from localStorage skips or start fresh
