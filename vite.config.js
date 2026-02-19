@@ -3,23 +3,19 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { execSync } from 'child_process';
 
-// Derive a deterministic port from the git branch name so each branch
-// gets its own dev server — no port collisions or stale-cache conflicts.
-function branchPort() {
+// Derive a branch-specific cache directory so different branches don't
+// share stale pre-bundled deps or HMR state on the same port.
+function branchCacheDir() {
   try {
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
-    let hash = 0;
-    for (let i = 0; i < branch.length; i++) {
-      hash = ((hash << 5) - hash + branch.charCodeAt(i)) | 0;
-    }
-    // Map to port range 3100–3999 (900 slots, well above ephemeral range)
-    return 3100 + (Math.abs(hash) % 900);
+    // Sanitize branch name for use as directory component
+    return 'node_modules/.vite-' + branch.replace(/[^a-zA-Z0-9_-]/g, '_');
   } catch {
-    return 5173; // fallback if not in a git repo
+    return 'node_modules/.vite';
   }
 }
 
-const port = branchPort();
+const cacheDir = branchCacheDir();
 
 export default defineConfig({
   plugins: [
@@ -47,12 +43,12 @@ export default defineConfig({
       },
     },
   },
+  cacheDir,
   optimizeDeps: {
     entries: ['./index.html', './test-point-cloud.html'],
   },
   server: {
-    port,
-    strictPort: true, // fail instead of silently picking another port
+    port: 5173,
     proxy: {
       '/parse-api': {
         target: 'https://parseapi.back4app.com',
