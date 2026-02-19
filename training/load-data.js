@@ -34,7 +34,7 @@ export async function loadSoberDateChanges(config, state) {
 
   if (!state.soberDateChanges) state.soberDateChanges = new Map();
   let totalLoaded = 0;
-  const BATCH_SIZE = 15;    // IDs per query (keep URL short: 15 × ~80 chars ≈ 1.2KB)
+  const BATCH_SIZE = 40;    // IDs per query (fewer requests = fewer API calls; ~40×80 chars ≈ 3.2KB)
   const CONCURRENCY = 8;    // parallel requests
   const PER_PAGE = 1000;    // Parse max results per query
 

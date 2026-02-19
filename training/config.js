@@ -9,6 +9,9 @@
  * (2019-era) have very sparse relapse data.
  *
  * Pass --oldest to load oldest data first.
+ *
+ * Fewer API calls: Each batch = 3 API calls (users, posts, comments in parallel).
+ * Use larger limits + fewer loadBatches to get similar data with fewer calls.
  */
 const oldest = process.argv.includes('--oldest');
 const recent = !oldest; // Default to recent now
@@ -17,14 +20,14 @@ export const config = {
   appId: process.env.PARSE_APP_ID || 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by',
   restKey: process.env.PARSE_REST_KEY || 'rNXb9qIR6wrZ3n81OG33HVQkpPsXANUatiOE5HSq',
   batch: {
-    userLimit: 500,
+    userLimit: 1000,   // max per request; fewer batches = fewer API calls
     postLimit: 1000,
     commentLimit: 2500,
     soberDateChangeLimit: 1500,
     order: recent ? '-createdAt' : 'createdAt',
   },
   recent,
-  loadBatches: 20,     // Load 20 batches to get ~90 days of data (was 5)
+  loadBatches: 8,      // Fewer, larger batches = way less API calls (8×3=24 vs 20×3=60)
   maxSessions: 50,
   // Logistic regression training params
   // Higher L2 regularization prevents over-weighting hasPriorReset

@@ -159,4 +159,46 @@ PARSE_APP_ID=xxx PARSE_REST_KEY=yyy npm run training
 
 - **Image loading** — Post images in Back4App are sometimes stored with incorrect file extensions (e.g. `_image.txt` served as `text/plain`). The app fetches them via `fetch()` → `Blob` → `URL.createObjectURL()` to force correct rendering regardless of MIME type.
 - **Canvas CORS** — All `<img>` elements and `new Image()` instances that feed into canvas use `crossOrigin="anonymous"` consistently to prevent browser cache poisoning and canvas taint errors.
-- **Back4App CDN** — Images served from `parsefiles.back4app.com` with `access-control-allow-origin: *`. If the CDN returns a non-200, planets fall back to placeholder gradient sprites.
+- **Back4App CDN** — Images are served from `parsefiles.back4app.com`. If the CDN returns a non-200, planets fall back to placeholder gradient sprites.
+
+### CORS and Parse CDN images (localhost)
+
+**Problem:** The Parse file CDN (`parsefiles.back4app.com`) does **not** send `Access-Control-Allow-Origin` headers. When the app runs on `http://localhost:5173` (or similar), the browser blocks direct requests to that CDN as cross-origin, so profile pictures and post images fail to load and the console shows CORS errors.
+
+**Fix:** When the app origin is localhost (or 127.0.0.1), we avoid cross-origin requests by routing all Parse CDN image URLs through a **same-origin proxy**:
+
+1. **Vite dev server** (`vite.config.js`): the path `/parsefiles-proxy` is proxied to `https://parsefiles.back4app.com`. Requests to `http://localhost:5173/parsefiles-proxy/...` are forwarded by Vite to the CDN; the browser only sees a same-origin request.
+2. **App code** (`test-point-cloud.html`): the helper **`getParseFilesProxyUrl(url)`** rewrites any `https://parsefiles.back4app.com/...` URL to `/parsefiles-proxy/...` when `window.location.origin` is localhost. Use this for **every** place that loads an image from the Parse CDN:
+   - Profile pictures (sidebar, star sprites, cache)
+   - Post grid thumbnails and expanded post image
+   - Orbiting planet textures (`_makePlanetTextureFromImage`, planet image batch)
+   - Blob fallback (`_imgBlobFallback`, `loadImageWithBlobFallback` when using fetch)
+
+**Rule:** Any new code that sets `img.src`, `fetch()`, or similar for a URL pointing at `parsefiles.back4app.com` must use `getParseFilesProxyUrl(url)` (or the profile-specific `getProfileImageFetchUrl(url)`) so that on localhost the request goes through the proxy. In production (e.g. Vercel), the app is served from the same host as the page; if you ever serve the app from a different origin and the CDN still doesn’t send CORS, you’d need a similar proxy on that host.
+
+### Codec, beams, and planets — training and performance
+
+**What the codec uses:** The spatial layout (in `lib/codec.js`) is driven by **members**, **posts**, and **comments**. It uses posts for per-member post count and comment-on-post counts (mass); it uses comments for connection graph, neighborhoods, and cohesion. Evolution (`evolve()`) runs during the **load job** and writes positions into state; the app then enriches the point cloud and saves a snapshot so the next load can restore without re-fetching or re-evolving.
+
+**Beams (comments):** Yes — we **do** train the codec with beam data. When you open a member and beams load, comments are cached in `beamDataCache` with a `commentsForCodec` list. The load job merges that cache into `state.comments` before calling `evolve()`, so the next time the job runs (and when it saves a snapshot), the layout reflects those connections. That makes future restores and layouts better for members whose beams have been loaded.
+
+**Planets (posts):** Partially. Posts are only added to `state.posts` by the **batch load** (`feedFromBack4App` with `postLimit`). Posts loaded on demand for the sidebar/planets (`loadUserPosts`) are **not** merged into `state.posts`, so the codec does not see them. Mass and seeds only use posts that came from the batch feed.
+
+**Recommendations to maximize performance:**
+
+1. **Merge on-demand posts into the codec** — Add a `postDataCache` (like `beamDataCache`): when `loadUserPosts` returns, store each post in a format compatible with `state.posts` (e.g. `{ creator, commentCount, created, ... }`). In the load job, before `evolve()`, merge this cache into `state.posts`. Then the codec gets richer post counts and future snapshots/layouts improve without extra API calls.
+
+2. **Re-run evolve only when it pays off** — Evolve is expensive. Today it runs once per load-job batch after merging the beam cache. Options: (a) keep that and rely on snapshot restores for speed; (b) after merging a large amount of new beam/post cache, run `evolve()` once and then `enrichPointCloudData()` + `saveSnapshot()` so the next session is faster; (c) run `evolve()` in a Web Worker so the main thread stays responsive.
+
+3. **Snapshot is the main performance win** — Restore from snapshot avoids re-fetch and re-evolve. Saving the snapshot **after** merging beam (and, if added, post) cache ensures the saved layout reflects all on-demand data we have, so future loads render faster.
+
+4. **Keep beam/post batch sizes modest** — Beams and planets are already batched (e.g. `BEAM_BATCH_SIZE`, `POST_CHUNK`). Tuning these down reduces jank when opening a member; the codec still benefits because merged cache is used on the next load job run.
+
+### Reducing API calls
+
+- **Training:** Each `feedFromBack4App` batch = 3 API calls (users, posts, comments in parallel). In `training/config.js`, use **fewer, larger batches**: e.g. `userLimit`/`postLimit` 1000 and `loadBatches: 8` → 8×3 = **24 calls** instead of 20×3 = 60. The codec only needs enough data for neighborhoods and cohesion; you get similar layout quality with fewer calls.
+- **Snapshot first:** Restore from snapshot when available so the app skips re-fetch and re-evolve (0 API calls until the user triggers a refresh or new load).
+- **Merge on-demand data:** Merge `beamDataCache` (and, if added, on-demand posts) into `state.comments` / `state.posts` before `evolve()` and before saving the snapshot. Then one load + merge gives the codec everything already fetched; the next session restores from snapshot and doesn’t need to re-request that data.
+- **Runtime load job:** Use one or two large batches (e.g. 1000 users, 1000 posts, 2500 comments per batch) instead of many small ones so the initial codec run needs only 3–6 API calls.
+
+- **Fewer API calls while navigating:** The app (e.g. `test-point-cloud.html`) reduces navigation API calls by: (1) **Beam cache** — 1‑hour TTL so revisiting a member reuses cached beams; (2) **Per-user post cache** — posts for a member are cached (1‑hour TTL) so reopening that member doesn’t refetch; (3) **Navigation cache persistence** — when the load job saves a snapshot, it also saves the beam and post caches (capped to 60 users) to `universeNavCache`. On restore from snapshot, those caches are repopulated so opening previously visited members uses cache and triggers no API calls.

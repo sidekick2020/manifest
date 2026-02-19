@@ -39,6 +39,14 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/parse-api/, ''),
         secure: true,
       },
+      // Proxy Parse CDN so all images (profile + post) load on localhost without CORS.
+      // See README "CORS and Parse CDN images (localhost)" — app uses getParseFilesProxyUrl() for every Parse CDN URL.
+      '/parsefiles-proxy': {
+        target: 'https://parsefiles.back4app.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/parsefiles-proxy/, ''),
+        secure: true,
+      },
     },
   },
   resolve: {

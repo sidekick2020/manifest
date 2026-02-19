@@ -60,6 +60,62 @@
     canvas {
       display: block;
     }
+    /* Loading screen — shown when navigating directly to a user via URL */
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 10, 26, 0.75);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      transition: opacity 0.6s ease, visibility 0.6s ease;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    #loading-screen.visible {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+    #loading-screen.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    #loading-screen .loading-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5em;
+      text-align: center;
+    }
+    #loading-screen .loading-title {
+      font-size: clamp(2.5rem, 8vw, 4rem);
+      font-weight: 700;
+      color: var(--color-accent);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      text-shadow: 0 0 40px rgba(167, 139, 250, 0.4);
+    }
+    #loading-screen .loading-tagline {
+      font-size: clamp(1rem, 3vw, 1.35rem);
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.85);
+      letter-spacing: 0.12em;
+      opacity: 0;
+      transform: translateY(8px);
+      animation: loading-tagline-in 0.8s ease 0.6s forwards;
+    }
+    @keyframes loading-tagline-in {
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
     button {
       margin: 5px 0;
       padding: 8px 16px;
@@ -387,6 +443,74 @@
       font-size: var(--font-size-sm);
       color: var(--color-text-secondary);
     }
+
+    /* Beams & Planets — highlighted stat cards in user panel */
+    .detail-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 16px;
+      padding: 14px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .detail-stat-card {
+      flex: 1;
+      min-width: 120px;
+      padding: 12px 14px;
+      border-radius: var(--border-radius-md);
+      background: linear-gradient(145deg, rgba(167, 139, 250, 0.12), rgba(167, 139, 250, 0.04));
+      border: 1px solid rgba(167, 139, 250, 0.25);
+      text-align: center;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .detail-stat-card:hover {
+      border-color: rgba(167, 139, 250, 0.4);
+      box-shadow: 0 0 20px rgba(167, 139, 250, 0.12);
+    }
+    .detail-stat-card.beams {
+      border-color: rgba(0, 204, 255, 0.3);
+      background: linear-gradient(145deg, rgba(0, 204, 255, 0.1), rgba(0, 204, 255, 0.03));
+    }
+    .detail-stat-card.beams:hover {
+      border-color: rgba(0, 204, 255, 0.45);
+      box-shadow: 0 0 20px rgba(0, 204, 255, 0.12);
+    }
+    .detail-stat-card.planets {
+      border-color: rgba(255, 193, 7, 0.35);
+      background: linear-gradient(145deg, rgba(255, 193, 7, 0.1), rgba(255, 193, 7, 0.03));
+    }
+    .detail-stat-card.planets:hover {
+      border-color: rgba(255, 193, 7, 0.5);
+      box-shadow: 0 0 20px rgba(255, 193, 7, 0.12);
+    }
+    .detail-stat-icon {
+      font-size: 1.5rem;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .detail-stat-value {
+      display: block;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--color-text-primary);
+      letter-spacing: 0.02em;
+    }
+    .detail-stat-label {
+      display: block;
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-top: 2px;
+    }
+    .detail-stat-desc {
+      font-size: 11px;
+      color: var(--color-text-secondary);
+      margin-top: 6px;
+      line-height: 1.3;
+    }
+
     #detail .risk-low { color: #4af; }
     #detail .risk-medium { color: #fa0; }
     #detail .risk-high { color: #f44; }
@@ -1137,25 +1261,24 @@
         <div class="detail-header-id"><strong>ID:</strong> <span id="detail-id">-</span></div>
       </div>
     </div>
-    <div style="padding: 20px; background: rgba(255,255,255,0.05); border-radius: 8px;">
-      <p><strong>Username:</strong> <span id="detail-username-full">-</span></p>
-      <p><strong>Position:</strong> <span id="detail-pos">-</span></p>
-      <p><strong>Risk Level:</strong> <span id="detail-risk">-</span></p>
 
-      <div id="risk-explanation" style="display: none; margin: 16px 0; padding: 16px; background: rgba(237, 73, 86, 0.1); border-left: 3px solid #ed4956; border-radius: 8px;">
-        <h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: #ed4956;">
-          Why is this user at high risk?
-        </h4>
-        <p id="risk-explanation-text" style="margin: 0; font-size: 13px; line-height: 1.5; color: var(--color-text-primary);">
-          <!-- Explanation will be inserted here -->
-        </p>
-      </div>
-
-      <p><strong>Activity:</strong> <span id="detail-activity">-</span></p>
-      <p><strong>Cluster:</strong> <span id="detail-cluster">-</span></p>
-      <p><strong>Sobriety:</strong> <span id="detail-sobriety">-</span></p>
-    </div>
     <button class="btn btn-primary btn-block" onclick="focusOnSelected()" style="margin-top: 10px;">Zoom to Member</button>
+
+    <!-- Beams & Planets stats (counts animate as data loads) -->
+    <div id="detail-stats" class="detail-stats">
+      <div class="detail-stat-card beams">
+        <span class="detail-stat-icon" aria-hidden="true">✨</span>
+        <span id="detail-beams-count" class="detail-stat-value">0</span>
+        <span class="detail-stat-label">Beams</span>
+        <span class="detail-stat-desc">Times they supported others</span>
+      </div>
+      <div class="detail-stat-card planets">
+        <span class="detail-stat-icon" aria-hidden="true">🪐</span>
+        <span id="detail-planets-count" class="detail-stat-value">0</span>
+        <span class="detail-stat-label">Planets</span>
+        <span class="detail-stat-desc">Stories they shared</span>
+      </div>
+    </div>
 
     <!-- Top 3 supported users — portrait playing card deck -->
     <div id="supporters-section" style="display:none; margin: 20px 0 0 0;">
@@ -1259,6 +1382,13 @@
 
   <button id="help-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
+  <div id="loading-screen" aria-live="polite" aria-busy="true">
+    <div class="loading-content">
+      <span class="loading-title">Manifest</span>
+      <span class="loading-tagline">You're Never Alone</span>
+    </div>
+  </div>
+
   <script type="importmap">
     {
       "imports": {
@@ -1288,6 +1418,7 @@
     let searchTimeout = null;
     const searchCache = new Map(); // Cache key: query string, value: {results, timestamp, version}
     const SEARCH_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+    const SEARCH_CACHE_MAX = 30;                  // cap entries so cache doesn't grow unbounded
     const SEARCH_CACHE_VERSION = 2; // Bump to invalidate old cache (e.g. stale profile picture data)
     const SEARCH_DEBOUNCE_DELAY = 300; // 300ms debounce
 
@@ -1351,6 +1482,14 @@
       // When URL hash changes (e.g. back/forward or manual edit), select that user if in universe
       window.addEventListener('hashchange', applyUserFromUrl);
 
+      // If navigating directly to a user via URL, show loading screen until we're ready (min 2s)
+      if (getSlugFromUrl()) {
+        const loadingEl = document.getElementById('loading-screen');
+        if (loadingEl) loadingEl.classList.add('visible');
+        _initialUrlUserPending = true;
+        _loadingScreenShownAt = Date.now();
+      }
+
       // Bottom controls suggestions: hide when user starts using controls
       function dismissControlsSuggestions() {
         const el = document.getElementById('controls-suggestions');
@@ -1367,15 +1506,23 @@
         const el = document.getElementById('controls-suggestions');
         if (el) el.classList.add('hidden');
       }
+      // Navigation state: pause beam animation and hide planets while rotating/panning
+      controls.addEventListener('start', () => { _isNavigating = true; });
+      controls.addEventListener('end', () => { _isNavigating = false; });
     }
 
     // Store point metadata for interaction
     let pointMetadata = [];
     let selectedMemberIndex = null;
+    // True when page loaded with a user in URL — we show loading screen and do God-view fly-in when ready
+    let _initialUrlUserPending = false;
+    let _loadingScreenShownAt = 0;
+    let _pendingFlyToIndex = null;
 
     // Incremental enrichment tracking
     const loadedMemberIds = new Set();
     const memberIndexMap = new Map(); // objectId -> array index
+    const usernameToIndexMap = new Map(); // lowercase username -> array index (for URL lookup)
     // Single active connection line (one star at a time, updates live with positions)
     let activeConnectionLine = null; // { lineSegments, sourceId, targetIds }
     const connectionLines = new Map(); // kept as empty stub so clearConnectionLines still works
@@ -1390,6 +1537,63 @@
     let selectedLabel = null;       // DOM div — username floating over star
     let selectedSprite = null;      // THREE.Sprite — profile pic rendered on star
     const _projectVec = new THREE.Vector3(); // reused each frame — no alloc in hot path
+
+    // Performance: throttle beam/planet updates to keep FPS up during rotate
+    let _heavyUpdateTick = 0;
+    // True while user is dragging/orbiting; beam pulse animation pauses
+    let _isNavigating = false;
+    // True only during camera fly-to (travel) to a member; hide beams/planets and skip their updates
+    let _isTraveling = false;
+
+    // Animated counters for detail panel (beams/planets) — cancel when switching user
+    let _detailBeamsRaf = null;
+    let _detailPlanetsRaf = null;
+    let _detailBeamsCurrent = 0;
+    let _detailPlanetsCurrent = 0;
+    const DETAIL_COUNTER_DURATION_MS = 600;
+
+    function animateDetailCounter(elementId, targetValue) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const isBeams = elementId === 'detail-beams-count';
+      if (isBeams) {
+        if (_detailBeamsRaf != null) cancelAnimationFrame(_detailBeamsRaf);
+        _detailBeamsRaf = null;
+      } else {
+        if (_detailPlanetsRaf != null) cancelAnimationFrame(_detailPlanetsRaf);
+        _detailPlanetsRaf = null;
+      }
+      let current = isBeams ? _detailBeamsCurrent : _detailPlanetsCurrent;
+      const start = current;
+      const startTime = performance.now();
+      function tick(now) {
+        const elapsed = now - startTime;
+        const t = Math.min(1, elapsed / DETAIL_COUNTER_DURATION_MS);
+        const ease = 1 - Math.pow(1 - t, 2);
+        current = Math.round(start + (targetValue - start) * ease);
+        if (current > targetValue) current = targetValue;
+        el.textContent = current;
+        if (isBeams) _detailBeamsCurrent = current; else _detailPlanetsCurrent = current;
+        if (current < targetValue) {
+          const raf = requestAnimationFrame(tick);
+          if (isBeams) _detailBeamsRaf = raf; else _detailPlanetsRaf = raf;
+        } else {
+          if (isBeams) _detailBeamsRaf = null; else _detailPlanetsRaf = null;
+        }
+      }
+      const raf = requestAnimationFrame(tick);
+      if (isBeams) _detailBeamsRaf = raf; else _detailPlanetsRaf = raf;
+    }
+
+    function updateDetailBeamsCount(userId, count) {
+      if (selectedMemberIndex == null || !pointMetadata[selectedMemberIndex] || pointMetadata[selectedMemberIndex].id !== userId) return;
+      animateDetailCounter('detail-beams-count', count);
+    }
+
+    function updateDetailPlanetsCount(userId, count) {
+      if (selectedMemberIndex == null || !pointMetadata[selectedMemberIndex] || pointMetadata[selectedMemberIndex].id !== userId) return;
+      animateDetailCounter('detail-planets-count', count);
+    }
 
     // Background jobs system
     let jobs = [];
@@ -1624,7 +1828,17 @@
         raycaster.setFromCamera(mouse, camera);
         const prevT = raycaster.params.Line.threshold;
         raycaster.params.Line.threshold = 1.2;
-        const hits = raycaster.intersectObject(activeConnectionLine.lineSegments);
+        let hits = [];
+        const batches = activeConnectionLine.batches;
+        if (batches) {
+          for (let i = 0; i < batches.length; i++) {
+            if (batches[i].lineSegments) {
+              hits = hits.concat(raycaster.intersectObject(batches[i].lineSegments));
+            }
+          }
+        } else if (activeConnectionLine.lineSegments) {
+          hits = raycaster.intersectObject(activeConnectionLine.lineSegments);
+        }
         raycaster.params.Line.threshold = prevT;
         renderer.domElement.style.cursor = hits.length > 0 ? 'pointer' : '';
       }
@@ -1646,20 +1860,19 @@
 
       raycaster.setFromCamera(mouse, camera);
 
-      // Check orbiting planets first — sprites use intersectObjects on group children
+      // Check orbiting planets first — only full-detail sprites (LOD overflow points are not clickable)
       if (orbitingPosts && orbitingPosts.children.length > 0) {
-        const planetHits = raycaster.intersectObjects(orbitingPosts.children, false);
+        const spriteChildren = orbitingPosts.children.filter((c) => c.isSprite);
+        const planetHits = raycaster.intersectObjects(spriteChildren, false);
         if (planetHits.length > 0) {
           const sprite = planetHits[0].object;
           const idx = sprite.userData.index;
-          // Highlight selected planet (scale up slightly)
+          // Highlight selected planet (scale up applied in animate loop so it works with distance LOD)
           if (selectedPlanetIndex >= 0 && selectedPlanetIndex < orbitingPosts.children.length) {
             const prev = orbitingPosts.children[selectedPlanetIndex];
-            if (prev) { const s = prev.userData._baseScale || 1; prev.scale.set(s, s, 1); }
+            if (prev && prev.userData._baseScale != null) prev.scale.setScalar(prev.userData._baseScale);
           }
           selectedPlanetIndex = idx;
-          sprite.userData._baseScale = sprite.scale.x;
-          sprite.scale.set(sprite.scale.x * 1.35, sprite.scale.y * 1.35, 1);
 
           const od = orbitData[idx];
           if (od && od.postId) {
@@ -1673,15 +1886,31 @@
       if (activeConnectionLine) {
         const prevLineThreshold = raycaster.params.Line.threshold;
         raycaster.params.Line.threshold = 1.2; // generous hit area for thick glow beams
-        const beamHits = raycaster.intersectObject(activeConnectionLine.lineSegments);
-        raycaster.params.Line.threshold = prevLineThreshold;
-        if (beamHits.length > 0) {
-          // Each segment is 2 vertices; faceIndex / 1 gives segment index
-          const segIdx = Math.floor(beamHits[0].index / 2);
-          const targetIdx = activeConnectionLine.targetIndices[segIdx];
-          if (targetIdx !== undefined) {
-            flashPoint(targetIdx);
+        let bestHit = null;
+        let bestTargetIdx = undefined;
+        const batches = activeConnectionLine.batches;
+        if (batches) {
+          for (let b = 0; b < batches.length; b++) {
+            const batch = batches[b];
+            if (!batch.lineSegments) continue;
+            const batchHits = raycaster.intersectObject(batch.lineSegments);
+            if (batchHits.length > 0 && (!bestHit || batchHits[0].distance < bestHit.distance)) {
+              bestHit = batchHits[0];
+              const segIdx = Math.floor(batchHits[0].index / 2);
+              bestTargetIdx = batch.targetIndices[segIdx];
+            }
           }
+        } else if (activeConnectionLine.lineSegments) {
+          const beamHits = raycaster.intersectObject(activeConnectionLine.lineSegments);
+          if (beamHits.length > 0) {
+            bestHit = beamHits[0];
+            const segIdx = Math.floor(beamHits[0].index / 2);
+            bestTargetIdx = activeConnectionLine.targetIndices[segIdx];
+          }
+        }
+        raycaster.params.Line.threshold = prevLineThreshold;
+        if (bestHit && bestTargetIdx !== undefined) {
+          flashPoint(bestTargetIdx);
           return;
         }
       }
@@ -1848,30 +2077,89 @@
       selectedLabel = null;
     }
 
-    function getUserIdFromUrl() {
+    function getSlugFromUrl() {
       const hash = location.hash.slice(1).replace(/^\//, '');
       return hash || null;
     }
 
-    function setUrlForUser(userId) {
-      const base = location.pathname + location.search;
-      if (userId) {
-        history.replaceState(null, '', base + '#/' + encodeURIComponent(userId));
-      } else {
-        history.replaceState(null, '', base);
+    /** Resolve URL slug (id or username, case-insensitive) to member index, or undefined. */
+    function getMemberIndexFromSlug(slug) {
+      if (!slug) return undefined;
+      const decoded = decodeURIComponent(slug).trim();
+      const byId = memberIndexMap.get(decoded);
+      if (byId !== undefined) return byId;
+      const byUsername = usernameToIndexMap.get(decoded.toLowerCase());
+      return byUsername;
+    }
+
+    function syncUsernameToIndexMap() {
+      usernameToIndexMap.clear();
+      if (!pointMetadata || pointMetadata.length === 0) return;
+      for (let i = 0; i < pointMetadata.length; i++) {
+        const m = pointMetadata[i];
+        const un = (m && m.username) ? String(m.username).trim().toLowerCase() : '';
+        if (un && un !== 'anonymous' && !/^user\d+$/.test(un)) {
+          usernameToIndexMap.set(un, i);
+        }
       }
+    }
+
+    function setUrlForUser(userId, username) {
+      const base = location.pathname + location.search;
+      if (!userId) {
+        history.replaceState(null, '', base);
+        return;
+      }
+      const raw = (username && username !== 'Anonymous' && !/^User\d+$/i.test(String(username)))
+        ? username
+        : userId;
+      const display = String(raw).trim();
+      history.replaceState(null, '', base + '#/' + encodeURIComponent(display));
+    }
+
+    const GOD_VIEW_POSITION = { x: 120, y: 0, z: 80 };
+    const GOD_VIEW_TARGET = { x: 0, y: 0, z: 0 };
+    const FLY_TO_USER_DURATION_MS = 2800;
+
+    function hideLoadingScreenThenFlyToUser(idx) {
+      const loadingEl = document.getElementById('loading-screen');
+      if (loadingEl) {
+        loadingEl.classList.remove('visible');
+        loadingEl.classList.add('hidden');
+        loadingEl.setAttribute('aria-busy', 'false');
+      }
+      if (!points || !points.geometry || !points.geometry.attributes.position) return;
+      camera.position.set(GOD_VIEW_POSITION.x, GOD_VIEW_POSITION.y, GOD_VIEW_POSITION.z);
+      controls.target.set(GOD_VIEW_TARGET.x, GOD_VIEW_TARGET.y, GOD_VIEW_TARGET.z);
+      controls.update();
+      flashPoint(idx, { fromGodView: true });
     }
 
     function applyUserFromUrl() {
       if (!points || !pointMetadata.length) return;
-      const userId = getUserIdFromUrl();
-      if (!userId) return;
-      const idx = memberIndexMap.get(decodeURIComponent(userId));
+      const slug = getSlugFromUrl();
+      if (!slug) return;
+      const idx = getMemberIndexFromSlug(slug);
       if (idx === undefined || idx === selectedMemberIndex) return;
-      flashPoint(idx);
+      if (_initialUrlUserPending) {
+        _initialUrlUserPending = false;
+        _pendingFlyToIndex = idx;
+        const minShowMs = 2000;
+        const elapsed = Date.now() - _loadingScreenShownAt;
+        const delay = Math.max(0, minShowMs - elapsed);
+        setTimeout(() => {
+          if (_pendingFlyToIndex != null) {
+            const targetIdx = _pendingFlyToIndex;
+            _pendingFlyToIndex = null;
+            hideLoadingScreenThenFlyToUser(targetIdx);
+          }
+        }, delay);
+      } else {
+        flashPoint(idx);
+      }
     }
 
-    function flashPoint(index) {
+    function flashPoint(index, options) {
       // Show detail panel
       const metadata = pointMetadata[index];
       if (!metadata) return;
@@ -1885,10 +2173,22 @@
       const suppSec = document.getElementById('supporters-section');
       if (suppSec) suppSec.style.display = 'none';
 
+      // Reset Beams/Planets counters and cancel any in-flight animations
+      if (_detailBeamsRaf != null) cancelAnimationFrame(_detailBeamsRaf);
+      if (_detailPlanetsRaf != null) cancelAnimationFrame(_detailPlanetsRaf);
+      _detailBeamsRaf = null;
+      _detailPlanetsRaf = null;
+      _detailBeamsCurrent = 0;
+      _detailPlanetsCurrent = 0;
+      const beamsEl = document.getElementById('detail-beams-count');
+      const planetsEl = document.getElementById('detail-planets-count');
+      if (beamsEl) beamsEl.textContent = '0';
+      if (planetsEl) planetsEl.textContent = '0';
+
       // Blur the sidebar when transitioning between users (already visible)
       const detailEl = document.getElementById('detail');
-      const alreadyOpen = detailEl.classList.contains('visible');
-      if (alreadyOpen) {
+      const alreadyOpen = detailEl && detailEl.classList.contains('visible');
+      if (alreadyOpen && detailEl) {
         detailEl.classList.add('content-transitioning');
       }
 
@@ -1918,58 +2218,82 @@
       // Set up floating label color to match risk level
       const riskColors = { low: '#3CDC78', medium: '#FFD580', high: '#FF5038' };
       const pipColor = riskColors[metadata.riskLevel] || '#ffffff';
-      lblText.textContent = '@' + username;
-      lblPip.style.background = pipColor;
-      lblEl.style.display = 'block';
+      if (lblText) lblText.textContent = '@' + username;
+      if (lblPip) lblPip.style.background = pipColor;
+      if (lblEl) lblEl.style.display = 'block';
 
       selectedSprite = { _placeholder: true, _disposed: false };
 
       if (imageUrl) {
-        avatar.classList.add('loading');
-        avatar.textContent = '';
-        // Fetch once with CORS and use the blob URL for BOTH sidebar and sprite.
-        // The sprite needs a same-origin (blob) URL to draw to canvas; direct CDN URL often fails CORS for canvas.
-        fetch(imageUrl, { mode: 'cors' })
+        if (avatar) {
+          avatar.classList.add('loading');
+          avatar.textContent = '';
+        }
+        const cachedBlobUrl = getCachedProfileBlobUrl(imageUrl);
+        if (cachedBlobUrl) {
+          const img = document.createElement('img');
+          img.alt = username;
+          if (avatar) avatar.appendChild(img);
+          img.onload = () => {
+            if (selectedMemberIndex !== index) return;
+            if (avatar) { avatar.classList.remove('loading'); img.classList.add('loaded'); }
+          };
+          img.onerror = () => {
+            if (avatar) { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); }
+          };
+          img.src = cachedBlobUrl;
+          createProfileSprite(cachedBlobUrl, username, index);
+        } else {
+        fetch(getProfileImageFetchUrl(imageUrl) || imageUrl, { mode: 'cors' })
           .then(r => r.ok ? r.blob() : Promise.reject(r.status))
           .then(blob => {
             if (selectedMemberIndex !== index) return;
-            const blobUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
+            const blobUrl = setProfileImageCache(imageUrl, blob) || URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
             if (_currentProfileBlobUrl) URL.revokeObjectURL(_currentProfileBlobUrl);
             _currentProfileBlobUrl = blobUrl;
 
             const img = document.createElement('img');
             img.alt = username;
-            avatar.appendChild(img);
+            if (avatar) avatar.appendChild(img);
             img.onload = () => {
               if (selectedMemberIndex !== index) return;
-              avatar.classList.remove('loading');
-              img.classList.add('loaded');
+              if (avatar) { avatar.classList.remove('loading'); img.classList.add('loaded'); }
             };
             img.onerror = () => {
-              avatar.classList.remove('loading');
-              avatar.innerHTML = '';
-              avatar.textContent = getInitials(username);
+              if (avatar) { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); }
             };
             img.src = blobUrl;
-
             createProfileSprite(blobUrl, username, index);
           })
           .catch(() => {
             if (selectedMemberIndex !== index) return;
-            createProfileSprite(null, username, index);
+            const cached = getCachedProfileBlobUrl(imageUrl);
+            if (cached) {
+              const img = document.createElement('img');
+              img.alt = username;
+              if (avatar) avatar.appendChild(img);
+              img.onload = () => { if (avatar) avatar.classList.remove('loading'); img.classList.add('loaded'); };
+              img.src = cached;
+              createProfileSprite(cached, username, index);
+              return;
+            }
+            createProfileSprite(imageUrl, username, index);
             const img = document.createElement('img');
             img.alt = username;
-            avatar.appendChild(img);
+            if (avatar) avatar.appendChild(img);
             loadImageWithBlobFallback(img, imageUrl,
-              () => { avatar.classList.remove('loading'); img.classList.add('loaded'); },
-              () => { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); },
+              () => { if (avatar) avatar.classList.remove('loading'); img.classList.add('loaded'); },
+              () => { if (avatar) { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); } },
               { forCanvas: false }
             );
           });
+        }
       } else {
-        avatar.classList.remove('loading');
-        avatar.innerHTML = '';
-        avatar.textContent = getInitials(username);
+        if (avatar) {
+          avatar.classList.remove('loading');
+          avatar.innerHTML = '';
+          avatar.textContent = getInitials(username);
+        }
 
         // Lazy-fetch proPic for stub users that have no profile picture yet.
         // If found, update the 3D sprite and sidebar avatar while this user is still selected.
@@ -1994,87 +2318,110 @@
             if (!url) return;
             if (pointMetadata[lazyIndex]) pointMetadata[lazyIndex].profilePicture = url;
             if (selectedMemberIndex !== lazyIndex) return;
-            fetch(url, { mode: 'cors' })
+            const cachedForLazy = getCachedProfileBlobUrl(url);
+            if (cachedForLazy) {
+              if (avatar) { avatar.innerHTML = ''; avatar.classList.add('loading'); }
+              const lazyImg = document.createElement('img');
+              lazyImg.alt = username;
+              if (avatar) avatar.appendChild(lazyImg);
+              lazyImg.onload = () => { if (avatar) avatar.classList.remove('loading'); lazyImg.classList.add('loaded'); };
+              lazyImg.src = cachedForLazy;
+              createProfileSprite(cachedForLazy, username, lazyIndex);
+            } else {
+            fetch(getProfileImageFetchUrl(url) || url, { mode: 'cors' })
               .then(r => r.ok ? r.blob() : Promise.reject(r.status))
               .then(blob => {
                 if (selectedMemberIndex !== lazyIndex) return;
-                const blobUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
+                const blobUrl = setProfileImageCache(url, blob) || URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
                 if (_currentProfileBlobUrl) URL.revokeObjectURL(_currentProfileBlobUrl);
                 _currentProfileBlobUrl = blobUrl;
-                avatar.innerHTML = '';
-                avatar.classList.add('loading');
+                if (avatar) { avatar.innerHTML = ''; avatar.classList.add('loading'); }
                 const lazyImg = document.createElement('img');
                 lazyImg.alt = username;
-                avatar.appendChild(lazyImg);
-                lazyImg.onload = () => { avatar.classList.remove('loading'); lazyImg.classList.add('loaded'); };
-                lazyImg.onerror = () => { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); };
+                if (avatar) avatar.appendChild(lazyImg);
+                lazyImg.onload = () => { if (avatar) avatar.classList.remove('loading'); lazyImg.classList.add('loaded'); };
+                lazyImg.onerror = () => { if (avatar) { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); } };
                 lazyImg.src = blobUrl;
                 createProfileSprite(blobUrl, username, lazyIndex);
               })
               .catch(() => {
                 if (selectedMemberIndex !== lazyIndex) return;
-                avatar.innerHTML = '';
-                avatar.classList.add('loading');
+                const cached = getCachedProfileBlobUrl(url);
+                if (cached) {
+                  if (avatar) { avatar.innerHTML = ''; avatar.classList.add('loading'); }
+                  const lazyImg = document.createElement('img');
+                  lazyImg.alt = username;
+                  if (avatar) avatar.appendChild(lazyImg);
+                  lazyImg.onload = () => { if (avatar) avatar.classList.remove('loading'); lazyImg.classList.add('loaded'); };
+                  lazyImg.src = cached;
+                  createProfileSprite(cached, username, lazyIndex);
+                  return;
+                }
+                if (avatar) { avatar.innerHTML = ''; avatar.classList.add('loading'); }
                 const lazyImg = document.createElement('img');
                 lazyImg.alt = username;
-                avatar.appendChild(lazyImg);
-                loadImageWithBlobFallback(lazyImg, url, () => { avatar.classList.remove('loading'); lazyImg.classList.add('loaded'); }, () => { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); }, { forCanvas: false });
-                createProfileSprite(null, username, lazyIndex);
+                if (avatar) avatar.appendChild(lazyImg);
+                loadImageWithBlobFallback(lazyImg, url, () => { if (avatar) avatar.classList.remove('loading'); lazyImg.classList.add('loaded'); }, () => { if (avatar) { avatar.classList.remove('loading'); avatar.innerHTML = ''; avatar.textContent = getInitials(username); } }, { forCanvas: false });
+                createProfileSprite(url, username, lazyIndex);
               });
+            }
           })
           .catch(() => { /* ignore */ });
         }
       }
 
-      document.getElementById('detail-id').textContent = metadata.id;
-      document.getElementById('detail-username').textContent = `@${username}`;
-      document.getElementById('detail-username-full').textContent = `@${username}`;
+      const setDetail = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+      setDetail('detail-id', metadata.id);
+      setDetail('detail-username', `@${username}`);
+      setDetail('detail-username-full', `@${username}`);
 
       // Safely handle position display (position can be null or have null x/y/z from feed)
       const pos = metadata.position;
       if (pos && typeof pos.x === 'number' && typeof pos.y === 'number' && typeof pos.z === 'number') {
-        document.getElementById('detail-pos').textContent = `(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`;
+        setDetail('detail-pos', `(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
       } else {
-        document.getElementById('detail-pos').textContent = 'N/A';
+        setDetail('detail-pos', 'N/A');
       }
 
       const riskSpan = document.getElementById('detail-risk');
-      riskSpan.textContent = `${metadata.risk}% (${metadata.riskLevel})`;
-      riskSpan.className = `risk-${metadata.riskLevel}`;
+      if (riskSpan) {
+        riskSpan.textContent = `${metadata.risk}% (${metadata.riskLevel})`;
+        riskSpan.className = `risk-${metadata.riskLevel}`;
+      }
 
       // Show/hide risk explanation based on risk level
       const riskExplanation = document.getElementById('risk-explanation');
       const riskExplanationText = document.getElementById('risk-explanation-text');
-
-      if (metadata.riskLevel === 'high') {
-        // Generate explanation based on risk factors
-        const explanation = generateRiskExplanation(metadata);
-        riskExplanationText.textContent = explanation;
-        riskExplanation.style.display = 'block';
-      } else {
-        riskExplanation.style.display = 'none';
+      if (riskExplanation && riskExplanationText) {
+        if (metadata.riskLevel === 'high') {
+          const explanation = generateRiskExplanation(metadata);
+          riskExplanationText.textContent = explanation;
+          riskExplanation.style.display = 'block';
+        } else {
+          riskExplanation.style.display = 'none';
+        }
       }
 
-      document.getElementById('detail-activity').textContent = `${metadata.activity} posts/comments`;
-      document.getElementById('detail-cluster').textContent = metadata.cluster;
-      document.getElementById('detail-sobriety').textContent = metadata.sobrietyDays > 0
+      setDetail('detail-activity', `${metadata.activity} posts/comments`);
+      setDetail('detail-cluster', metadata.cluster);
+      setDetail('detail-sobriety', metadata.sobrietyDays > 0
         ? `${metadata.sobrietyDays.toLocaleString()} days`
-        : (metadata.sobrietyDate || metadata.sobriety ? '< 1 day' : 'Not set');
+        : (metadata.sobrietyDate || metadata.sobriety ? '< 1 day' : 'Not set'));
 
-      detailEl.classList.add('visible');
+      if (detailEl) detailEl.classList.add('visible');
       // Mobile bottom sheet: start at 1/3 height so user can scroll up for full details
-      if (window.innerWidth <= 768) {
+      if (detailEl && window.innerWidth <= 768) {
         detailEl.classList.remove('detail-expanded');
       }
 
-      // Update URL so this user can be revisited via the same link
-      setUrlForUser(metadata.id);
+      // Update URL so this user can be revisited via the same link (prefer username in URL)
+      setUrlForUser(metadata.id, metadata.username);
 
       // Remove blur after content is swapped — triggers fade-back-in transition
-      if (alreadyOpen) {
+      if (alreadyOpen && detailEl) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            detailEl.classList.remove('content-transitioning');
+            if (detailEl) detailEl.classList.remove('content-transitioning');
           });
         });
       }
@@ -2083,8 +2430,7 @@
       const PROFILE_PRIORITY_DELAY_MS = 400;
       setTimeout(() => loadUserPosts(metadata.id), PROFILE_PRIORITY_DELAY_MS);
 
-      // Draw connection lines to users this person has commented to
-      drawConnectionLines(metadata.id);
+      // Beams are drawn after zoom/travel finishes (see animateZoom callbacks below)
 
       // Zoom close to the selected star
       if (!points || !points.geometry || !points.geometry.attributes.position) {
@@ -2106,24 +2452,75 @@
 
       // Skip zoom only when re-selecting the same star we're already viewing
       const distToTarget = camera.position.distanceTo(targetPos);
-      if (prevIndex === index && distToTarget <= 12) return; // same star, already zoomed — don't re-animate
+      if (prevIndex === index && distToTarget <= 12) {
+        drawConnectionLines(metadata.id); // still load/refresh beams when re-selecting same star
+        return;
+      }
 
-      const endPos = targetPos.clone().add(new THREE.Vector3(3, 3, 5));
-      const startPos = camera.position.clone();
-      const startTarget = controls.target.clone();
+      // Position camera in front of the member (on the ray from center through member), zoomed in; orbit target = member so drag rotates around them
+      const center = new THREE.Vector3(0, 0, 0);
+      const distToCenter = targetPos.length();
+      const CAMERA_DISTANCE_FROM_MEMBER = 10 / 3;
+      let endPos, endTarget;
+      if (distToCenter < 0.01) {
+        endPos = targetPos.clone().add(new THREE.Vector3(1, 1, 5 / 3));
+        endTarget = targetPos.clone();
+      } else {
+        const dirFromCenter = targetPos.clone().normalize();
+        endPos = targetPos.clone().add(dirFromCenter.multiplyScalar(CAMERA_DISTANCE_FROM_MEMBER));
+        endTarget = targetPos.clone();
+      }
 
-      let t = 0;
-      const animateZoom = () => {
-        t += 0.03;
-        if (t > 1) t = 1;
+      const fromGodView = options && options.fromGodView;
+      const startPos = fromGodView
+        ? new THREE.Vector3(GOD_VIEW_POSITION.x, GOD_VIEW_POSITION.y, GOD_VIEW_POSITION.z)
+        : camera.position.clone();
+      const startTarget = fromGodView
+        ? new THREE.Vector3(GOD_VIEW_TARGET.x, GOD_VIEW_TARGET.y, GOD_VIEW_TARGET.z)
+        : controls.target.clone();
 
-        camera.position.lerpVectors(startPos, endPos, t);
-        controls.target.lerpVectors(startTarget, targetPos, t);
+      if (fromGodView) {
+        camera.position.copy(startPos);
+        controls.target.copy(startTarget);
         controls.update();
+      }
 
-        if (t < 1) requestAnimationFrame(animateZoom);
-      };
-      animateZoom();
+      const userIdForBeams = metadata.id;
+      _isTraveling = true;
+      if (fromGodView) {
+        const startTime = performance.now();
+        const animateZoom = () => {
+          const elapsed = performance.now() - startTime;
+          const tLinear = Math.min(1, elapsed / FLY_TO_USER_DURATION_MS);
+          const t = 1 - Math.pow(1 - tLinear, 3);
+          camera.position.lerpVectors(startPos, endPos, t);
+          controls.target.lerpVectors(startTarget, endTarget, t);
+          controls.update();
+          if (t >= 1) {
+            _isTraveling = false;
+            drawConnectionLines(userIdForBeams);
+            return;
+          }
+          requestAnimationFrame(animateZoom);
+        };
+        animateZoom();
+      } else {
+        let t = 0;
+        const animateZoom = () => {
+          t += 0.03;
+          if (t > 1) t = 1;
+          camera.position.lerpVectors(startPos, endPos, t);
+          controls.target.lerpVectors(startTarget, endTarget, t);
+          controls.update();
+          if (t >= 1) {
+            _isTraveling = false;
+            drawConnectionLines(userIdForBeams);
+            return;
+          }
+          requestAnimationFrame(animateZoom);
+        };
+        animateZoom();
+      }
     }
 
     function generateRiskExplanation(metadata) {
@@ -2381,7 +2778,12 @@
         currentSearchResults = matches;
         selectedSearchIndex = -1;
 
-        // Cache the results
+        // Cache the results (cap size so cache doesn't grow unbounded)
+        while (searchCache.size >= SEARCH_CACHE_MAX) {
+          const firstKey = searchCache.keys().next().value;
+          if (firstKey == null) break;
+          searchCache.delete(firstKey);
+        }
         searchCache.set(queryLower, {
           results: matches,
           timestamp: Date.now(),
@@ -2420,7 +2822,8 @@
       const fallbackHtml = fallbackText ? `<div class="post-text">${fallbackText}</div>` : '';
       if (!url || imgEl._blobAttempted) { if (fallbackHtml) imgEl.outerHTML = fallbackHtml; return; }
       imgEl._blobAttempted = true;
-      fetch(url, { mode: 'cors' })
+      const fetchUrl = getParseFilesProxyUrl(url) || url;
+      fetch(fetchUrl, { mode: 'cors' })
         .then(r => r.ok ? r.blob() : Promise.reject(r.status))
         .then(blob => {
           const objectUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
@@ -2439,6 +2842,7 @@
     function loadImageWithBlobFallback(img, url, onLoad, onError, options) {
       const forCanvas = options && options.forCanvas;
       if (!url) { if (onError) onError(); return; }
+      const fetchUrl = (typeof getProfileImageFetchUrl === 'function' ? getProfileImageFetchUrl(url) : null) || url;
       if (forCanvas) img.crossOrigin = 'anonymous';
       img.onload = () => {
         if (img._blobUrl) { URL.revokeObjectURL(img._blobUrl); img._blobUrl = null; }
@@ -2448,18 +2852,18 @@
         if (!forCanvas) { if (onError) onError(); return; }
         if (img._blobAttempted) { if (onError) onError(); return; }
         img._blobAttempted = true;
-        fetch(url, { mode: 'cors' })
+        fetch(fetchUrl, { mode: 'cors' })
           .then(r => r.ok ? r.blob() : Promise.reject(r.status))
           .then(blob => {
-            const objectUrl = URL.createObjectURL(new Blob([blob], { type: 'image/jpeg' }));
+            const objectUrl = (typeof setProfileImageCache === 'function' && setProfileImageCache(url, blob)) || URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob], { type: 'image/jpeg' }));
             img._blobUrl = objectUrl;
             img.onload = () => {
-              URL.revokeObjectURL(objectUrl);
+              if (img._blobUrl && (!profileImageCache || profileImageCache.get(url)?.blobUrl !== img._blobUrl)) URL.revokeObjectURL(img._blobUrl);
               img._blobUrl = null;
               if (onLoad) onLoad();
             };
             img.onerror = () => {
-              URL.revokeObjectURL(objectUrl);
+              if (img._blobUrl && (!profileImageCache || profileImageCache.get(url)?.blobUrl !== img._blobUrl)) URL.revokeObjectURL(img._blobUrl);
               img._blobUrl = null;
               if (onError) onError();
             };
@@ -2467,11 +2871,55 @@
           })
           .catch(() => { if (onError) onError(); });
       };
-      img.src = url;
+      img.src = forCanvas && fetchUrl !== url ? fetchUrl : url;
     }
 
     const B4A_APP_ID = 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by';
     const B4A_PARSEFILES_BASE = 'https://parsefiles.back4app.com/' + B4A_APP_ID + '/';
+    const PARSEFILES_ORIGIN = 'https://parsefiles.back4app.com';
+
+    /**
+     * Rewrite Parse CDN URLs to same-origin proxy on localhost to avoid CORS (Parse CDN sends no Access-Control-Allow-Origin).
+     * Use for every place we load images from parsefiles.back4app.com: profile pics, post grid/expanded, planet textures, blob fallbacks.
+     * Rule: new code that sets img.src or fetch() for a Parse CDN URL must use this (or getProfileImageFetchUrl). See README "CORS and Parse CDN images".
+     */
+    function getParseFilesProxyUrl(url) {
+      if (!url || typeof url !== 'string') return url;
+      const origin = window.location.origin;
+      const isLocal = origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1');
+      if (!isLocal || !url.startsWith(PARSEFILES_ORIGIN + '/')) return url;
+      return '/parsefiles-proxy/' + url.slice((PARSEFILES_ORIGIN + '/').length);
+    }
+
+    function getProfileImageFetchUrl(url) {
+      return getParseFilesProxyUrl(url) || url;
+    }
+
+    /** Shared profile image cache: URL -> { blobUrl, blob }. Blob URLs work for both <img> and canvas/sprite. */
+    const PROFILE_IMAGE_CACHE_MAX = 80;
+    const profileImageCache = new Map(); // url -> { blobUrl, blob }
+
+    function getCachedProfileBlobUrl(url) {
+      if (!url) return null;
+      const entry = profileImageCache.get(url);
+      if (!entry) return null;
+      return entry.blobUrl;
+    }
+
+    function setProfileImageCache(url, blob) {
+      if (!url || !blob) return null;
+      const existing = profileImageCache.get(url);
+      if (existing) return existing.blobUrl;
+      while (profileImageCache.size >= PROFILE_IMAGE_CACHE_MAX) {
+        const firstKey = profileImageCache.keys().next().value;
+        const old = profileImageCache.get(firstKey);
+        if (old && old.blobUrl) URL.revokeObjectURL(old.blobUrl);
+        profileImageCache.delete(firstKey);
+      }
+      const blobUrl = URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob], { type: 'image/jpeg' }));
+      profileImageCache.set(url, { blobUrl, blob });
+      return blobUrl;
+    }
 
     /** Get profile picture URL from Parse File (proPic/profilePicture). Prefer .url from the Parse file. */
     function getProfilePictureUrl(fileObj) {
@@ -2793,6 +3241,10 @@
       // Register in memberIndexMap so planets orbit at the right position
       memberIndexMap.set(member.id, newIndex);
       loadedMemberIds.add(member.id);
+      const un = (member.username && String(member.username).trim()) ? String(member.username).trim().toLowerCase() : '';
+      if (un && un !== 'anonymous' && !/^user\d+$/.test(un)) {
+        usernameToIndexMap.set(un, newIndex);
+      }
 
       console.log(`Added ${member.username} at index ${newIndex}`);
       return newIndex;
@@ -2893,7 +3345,7 @@
         } catch(e) { /* canvas draw error — keep placeholder glow */ }
       };
       img.onerror = () => {}; // keep placeholder on error
-      img.src = imgUrl;
+      img.src = getParseFilesProxyUrl(imgUrl) || imgUrl;
     }
 
     let _dbgEvents = []; // ring buffer of events for HUD display
@@ -2907,10 +3359,22 @@
     function clearOrbitingPosts() {
       _dbgLog('clearOrbitingPosts had=' + (orbitingPosts ? orbitingPosts.children.length : 'null') + ' host=' + orbitHostId);
       if (orbitingPosts) {
-        // orbitingPosts is now a THREE.Group of sprites
+        // LOD: dispose overflow Points if present (single mesh for planets beyond sprite tier)
+        const overflow = orbitingPosts.userData.overflowPoints;
+        if (overflow) {
+          if (overflow.geometry) overflow.geometry.dispose();
+          if (overflow.material) {
+            if (overflow.material.map) overflow.material.map.dispose();
+            overflow.material.dispose();
+          }
+          orbitingPosts.remove(overflow);
+          orbitingPosts.userData.overflowPoints = null;
+        }
+        orbitingPosts.userData.numPlanetSprites = 0;
+        // Sprites (full-detail planets)
         orbitingPosts.children.slice().forEach(s => {
           if (s.material) {
-            if (s.material.map) s.material.map.dispose(); // dispose CanvasTexture to free GPU memory
+            if (s.material.map) s.material.map.dispose();
             s.material.dispose();
           }
           orbitingPosts.remove(s);
@@ -2928,8 +3392,17 @@
       clearOrbitingPosts();
       if (!points || postCount === 0) return;
 
-      const count = Math.min(postCount, 100);
+      // LOD: no cap — show all planets (sprites for first N, rest as one Points mesh)
+      const count = postCount;
+      const numSprites = Math.min(count, PLANET_SPRITE_LOD);
       orbitHostId = userId;
+
+      // Order posts by creation date: earliest first → inner orbits, newest → outer
+      const orderIndices = Array.from({ length: count }, (_, i) => i).sort((a, b) => {
+        const ta = postDates && postDates[a] ? new Date(postDates[a]).getTime() : 0;
+        const tb = postDates && postDates[b] ? new Date(postDates[b]).getTime() : 0;
+        return ta - tb;
+      });
 
       // ── Compute max safe orbit radius (half distance to nearest neighbour) ──
       // This prevents planets from drifting closer to a different star than the host.
@@ -2983,7 +3456,8 @@
       // To prevent planet reaching other stars: orbit + wSize/2 < maxSafeRadius.
       const planetSizes = [];
       for (let i = 0; i < count; i++) {
-        const cc = (postCommentCounts && postCommentCounts[i]) || 0;
+        const idx = orderIndices[i];
+        const cc = (postCommentCounts && postCommentCounts[idx]) || 0;
         // Base size 0.18 world units; grows with comment count up to maxPlanetSize cap
         const rawSize = 0.18 + Math.log(cc + 1) * 0.04;
         planetSizes.push(Math.min(rawSize, maxPlanetSize));
@@ -3008,52 +3482,25 @@
       }
       // ─────────────────────────────────────────────────────────────────────────
 
-      // Group holds all planet sprites so we can move them together
+      // Group holds sprites (LOD tier 1) and optionally one Points mesh (LOD tier 2)
       orbitingPosts = new THREE.Group();
-      orbitingPosts.frustumCulled = false; // never cull the group regardless of camera distance
-      orbitingPosts.renderOrder = 10; // render after beams/stars so planets always appear on top
+      orbitingPosts.frustumCulled = false;
+      orbitingPosts.renderOrder = 10;
+      orbitingPosts.visible = true;
+      orbitingPosts.userData.numPlanetSprites = numSprites;
       scene.add(orbitingPosts);
 
       const CANVAS_SIZE = 256;
       const GOLDEN = Math.PI * (3 - Math.sqrt(5));
 
-      // Collect deferred image loads — fired after a staggered delay so the
-      // profile picture request (fired by flashPoint before this runs) wins
-      // the browser's HTTP connection pool.
       const deferredImageLoads = [];
 
       for (let i = 0; i < count; i++) {
-        const hue   = 30 + (i * 37) % 60; // warm orange-amber palette per planet
+        const idx = orderIndices[i];
+        const hue   = 30 + (i * 37) % 60;
         const wSize = planetSizes[i];
 
-        // Build placeholder canvas texture (instant, no network)
-        const canvas  = _makePlanetCanvas(CANVAS_SIZE, hue);
-        const texture = new THREE.CanvasTexture(canvas);
-
-        const mat = new THREE.SpriteMaterial({
-          map:         texture,
-          transparent: true,
-          depthWrite:  false,
-          depthTest:   false, // always draw planets — prevents them vanishing behind/inside beam geometry
-          blending:    THREE.NormalBlending,
-          opacity:     0.0, // start invisible — entrance animation brings it in
-        });
-        const sprite = new THREE.Sprite(mat);
-        sprite.renderOrder = 10; // matches group renderOrder — render after beams and stars
-        sprite.scale.set(wSize, wSize, 1);
-        sprite.frustumCulled = false; // never cull — planets are always near the selected star
-        // _spawnTime staggered so planets fade in one after another
-        const spawnDelay = i * 60; // ms — each planet appears 60ms after the previous
-        sprite.userData = { index: i, postId: postIds ? postIds[i] : null, _spawnTime: performance.now() + spawnDelay };
-        orbitingPosts.add(sprite);
-
-        // Queue image load — staggered so profile pic loads first
-        const imgUrl = postImages && postImages[i];
-        if (imgUrl) {
-          deferredImageLoads.push({ imgUrl, hue, sprite });
-        }
-
-        // Orbit params — non-overlapping radii, slow speed
+        // Orbit params for all (used by sprites and by overflow Points)
         const t = count > 1 ? i / (count - 1) : 0;
         const radius = orbitRadii[i];
         orbitData.push({
@@ -3062,9 +3509,64 @@
           radius,
           tiltX:    (i * 0.9) % Math.PI,
           tiltZ:    (i * 1.4) % Math.PI,
-          postId:   postIds   ? postIds[i]   : null,
-          createdAt: postDates ? postDates[i] : null,
+          postId:   postIds   ? postIds[idx]   : null,
+          createdAt: postDates ? postDates[idx] : null,
         });
+
+        // LOD: full sprites only for first PLANET_SPRITE_LOD; rest drawn as Points below
+        if (i >= numSprites) continue;
+
+        const canvas  = _makePlanetCanvas(CANVAS_SIZE, hue);
+        const texture = new THREE.CanvasTexture(canvas);
+
+        const mat = new THREE.SpriteMaterial({
+          map:         texture,
+          transparent: true,
+          depthWrite:  false,
+          depthTest:   false,
+          blending:    THREE.NormalBlending,
+          opacity:     0.0,
+        });
+        const sprite = new THREE.Sprite(mat);
+        sprite.renderOrder = 10;
+        sprite.scale.set(wSize, wSize, 1);
+        sprite.frustumCulled = false;
+        const spawnDelay = i * 60;
+        sprite.userData = { index: i, postId: postIds ? postIds[idx] : null, _spawnTime: performance.now() + spawnDelay, _baseScale: wSize };
+        orbitingPosts.add(sprite);
+
+        const imgUrl = postImages && postImages[idx];
+        if (imgUrl) {
+          deferredImageLoads.push({ imgUrl, hue, sprite });
+        }
+      }
+
+      // LOD tier 2: one Points mesh for planets beyond sprite count (single draw call)
+      if (count > numSprites) {
+        const overflowCount = count - numSprites;
+        const geo = new THREE.BufferGeometry();
+        const posArr = new Float32Array(overflowCount * 3);
+        geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+        geo.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
+
+        const dotCanvas = _makePlanetCanvas(64, 45);
+        const dotTexture = new THREE.CanvasTexture(dotCanvas);
+
+        const pointsMat = new THREE.PointsMaterial({
+          size: 0.12,
+          map: dotTexture,
+          transparent: true,
+          opacity: 0.88,
+          depthTest: false,
+          depthWrite: false,
+          sizeAttenuation: true,
+          blending: THREE.NormalBlending,
+        });
+        const overflowPoints = new THREE.Points(geo, pointsMat);
+        overflowPoints.renderOrder = 10;
+        overflowPoints.frustumCulled = false;
+        orbitingPosts.add(overflowPoints);
+        orbitingPosts.userData.overflowPoints = overflowPoints;
       }
 
       // Planet image batches: start after profile picture has had time to load (prioritize profile pic).
@@ -3076,6 +3578,7 @@
         let remaining = batch.length;
         const onDone = () => { remaining--; if (remaining === 0) _runImageBatch(startIdx + BATCH_SIZE); };
         batch.forEach(({ imgUrl, hue, sprite }) => {
+          const fetchUrl = getParseFilesProxyUrl(imgUrl) || imgUrl;
           // Helper: given a loaded Image, draw it onto a canvas sprite
           const drawToSprite = (img, objectUrl) => {
             try {
@@ -3120,7 +3623,7 @@
           };
 
           // Fetch via blob to force image MIME type — handles wrong extensions (e.g. _image.txt)
-          fetch(imgUrl, { mode: 'cors' })
+          fetch(fetchUrl, { mode: 'cors' })
             .then(r => r.ok ? r.blob() : Promise.reject(r.status))
             .then(blob => {
               const img = new Image();
@@ -3141,7 +3644,7 @@
               img.crossOrigin = 'anonymous';
               img.onload = () => drawToSprite(img, null);
               img.onerror = () => onDone();
-              img.src = imgUrl;
+              img.src = fetchUrl;
             });
         });
       }
@@ -3156,79 +3659,144 @@
       if (orbitHostId === userId && orbitingPosts && orbitingPosts.children.length > 0) { _dbgLog('loadUserPosts: GUARD-already-showing'); return; }
       // Prevent duplicate concurrent fetches for same user
       if (_loadingPostsForUser === userId) { _dbgLog('loadUserPosts: GUARD-already-loading'); return; }
-      _loadingPostsForUser = userId;
 
       const postsGrid = document.getElementById('posts-grid');
 
-      // Show loading state
+      // Use per-user cache when valid — fewer API calls while navigating
+      const cachedPosts = postCacheByUser.get(userId);
+      if (cachedPosts && (Date.now() - cachedPosts.timestamp < POST_CACHE_TTL_MS)) {
+        const allResults = cachedPosts.posts;
+        if (allResults.length === 0) {
+          postsGrid.innerHTML = '<div class="posts-loading">No posts yet</div>';
+          updateDetailPlanetsCount(userId, 0);
+          return;
+        }
+        allResults.forEach((p) => {
+          const id = p.objectId;
+          if (!id) return;
+          const creator = p.creator?.objectId || p.creator || userId;
+          postDataCache.set(id, { creator, content: p.content || '', commentCount: p.commentCount || 0, created: p.createdAt || p.created, image: typeof p.image === 'string' ? p.image : (p.image && typeof p.image === 'object' && p.image.url) ? p.image.url : null });
+        });
+        const postCommentCounts = allResults.map(p => p.commentCount || 0);
+        const postIds = allResults.map(p => p.objectId);
+        const postDates = allResults.map(p => p.createdAt || null);
+        const postImages = allResults.map(p => (typeof p.image === 'string' && p.image) ? p.image : (p.image && typeof p.image === 'object' && p.image.url) ? p.image.url : null);
+        spawnOrbitingPosts(userId, allResults.length, postCommentCounts, postIds, postDates, postImages);
+        postsGrid.innerHTML = allResults.map((post) => {
+          let mediaUrl = typeof post.image === 'string' ? post.image : (post.image && post.image.url) ? post.image.url : null;
+          const mediaUrlForSrc = getParseFilesProxyUrl(mediaUrl) || mediaUrl;
+          const hasMedia = mediaUrl && mediaUrl.length > 0;
+          const text = (post.content || '').slice(0, 100).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          if (hasMedia) {
+            return `<div class="post-item loading" data-post-id="${post.objectId}" data-fallback-text="${text}" onclick="expandPost('${post.objectId}', '${userId}')"><img src="${mediaUrlForSrc}" data-src="${mediaUrl}" crossorigin="anonymous" alt="Post" onload="this.classList.add('loaded'); this.parentElement.classList.remove('loading');" onerror="_imgBlobFallback(this)" /></div>`;
+          }
+          return `<div class="post-item" data-post-id="${post.objectId}" onclick="expandPost('${post.objectId}', '${userId}')"><div class="post-text">${text || '(no text)'}</div></div>`;
+        }).join('');
+        updateDetailPlanetsCount(userId, allResults.length);
+        return;
+      }
+
+      _loadingPostsForUser = userId;
       postsGrid.innerHTML = '<div class="posts-loading">Loading posts...</div>';
 
       try {
-        // Fetch user's posts from Back4App.
-        // Try Pointer syntax first (standard for Parse Pointer fields),
-        // then fall back to plain string if needed (some setups accept both).
+        // Fetch user's posts from Back4App in chunks so we can load more than 100.
         const POST_HEADERS = {
           'X-Parse-Application-Id': 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by',
           'X-Parse-REST-API-Key': 'rNXb9qIR6wrZ3n81OG33HVQkpPsXANUatiOE5HSq'
         };
-        const POST_QUERY_BASE = {
-          order: '-createdAt',
-          limit: '100',
-          keys: 'objectId,content,image,createdAt,commentCount'
-        };
+        const POST_PAGE_SIZE = 40;
+        const keys = 'objectId,content,image,createdAt,commentCount';
+        const wherePointer = { creator: { __type: 'Pointer', className: '_User', objectId: userId } };
+        const wherePlain = { creator: userId };
 
-        // Primary: Pointer-format query
-        const params = new URLSearchParams({
-          ...POST_QUERY_BASE,
-          where: JSON.stringify({
-            creator: { __type: 'Pointer', className: '_User', objectId: userId }
-          }),
-        });
-
-        let response = await fetch(`https://parseapi.back4app.com/classes/post?${params}`, {
-          method: 'GET', headers: POST_HEADERS
-        });
-
-        let data = null;
-        if (response.ok) {
-          data = await response.json();
-        }
-
-        // Fallback: plain-string creator query (works on some Back4App configurations)
-        if (!data || !data.results || data.results.length === 0) {
-          const fallbackParams = new URLSearchParams({
-            ...POST_QUERY_BASE,
-            where: JSON.stringify({ creator: userId }),
+        const fetchPage = async (skip, usePointer) => {
+          const where = usePointer ? wherePointer : wherePlain;
+          const params = new URLSearchParams({
+            where: JSON.stringify(where),
+            order: '-createdAt',
+            limit: String(POST_PAGE_SIZE),
+            skip: String(skip),
+            keys,
           });
-          const fallbackResp = await fetch(`https://parseapi.back4app.com/classes/post?${fallbackParams}`, {
+          const response = await fetch(`https://parseapi.back4app.com/classes/post?${params}`, {
             method: 'GET', headers: POST_HEADERS
           });
-          if (fallbackResp.ok) data = await fallbackResp.json();
+          if (!response.ok) return null;
+          return response.json();
+        };
+
+        let allResults = [];
+        let skip = 0;
+        let usePointer = true;
+
+        while (true) {
+          if (selectedMemberIndex == null || !pointMetadata[selectedMemberIndex] || pointMetadata[selectedMemberIndex].id !== userId) {
+            return;
+          }
+          let data = await fetchPage(skip, usePointer);
+          if (!data || !data.results) {
+            if (skip === 0 && usePointer) {
+              usePointer = false;
+              continue;
+            }
+            if (skip === 0) {
+              console.error('Post loading failed for user', userId);
+              throw new Error('Failed to load posts');
+            }
+            break;
+          }
+          const page = data.results;
+          allResults = allResults.concat(page);
+          updateDetailPlanetsCount(userId, allResults.length);
+          if (page.length < POST_PAGE_SIZE) {
+            // If first page was empty with Pointer query, try plain creator fallback (same as original)
+            if (skip === 0 && page.length === 0 && usePointer) {
+              usePointer = false;
+              continue;
+            }
+            break;
+          }
+          skip += page.length;
         }
 
-        if (!data || !data.results) {
-          console.error('Post loading failed for user', userId);
-          throw new Error('Failed to load posts');
-        }
-
-        if (!data.results || data.results.length === 0) {
+        if (allResults.length === 0) {
           postsGrid.innerHTML = '<div class="posts-loading">No posts yet</div>';
+          updateDetailPlanetsCount(userId, 0);
           return;
         }
 
+        // Cache for this user so revisiting doesn't trigger API calls while navigating
+        evictPostCachesIfNeeded();
+        postCacheByUser.set(userId, { posts: allResults, timestamp: Date.now() });
+
+        // Feed posts into codec cache so next evolve() has better mass/post counts (see README "Codec, beams, and planets")
+        allResults.forEach((p) => {
+          const id = p.objectId;
+          if (!id) return;
+          const creator = p.creator?.objectId || p.creator || userId;
+          postDataCache.set(id, {
+            creator,
+            content: p.content || '',
+            commentCount: p.commentCount || 0,
+            created: p.createdAt || p.created,
+            image: typeof p.image === 'string' ? p.image : (p.image && typeof p.image === 'object' && p.image.url) ? p.image.url : null,
+          });
+        });
+
         // Spawn orbiting planet for each post; pass per-post comment counts, ids, dates, images
-        const postCommentCounts = data.results.map(p => p.commentCount || 0);
-        const postIds   = data.results.map(p => p.objectId);
-        const postDates = data.results.map(p => p.createdAt || null);
-        const postImages = data.results.map(p => {
+        const postCommentCounts = allResults.map(p => p.commentCount || 0);
+        const postIds   = allResults.map(p => p.objectId);
+        const postDates = allResults.map(p => p.createdAt || null);
+        const postImages = allResults.map(p => {
           if (typeof p.image === 'string' && p.image) return p.image;
           if (p.image && typeof p.image === 'object' && p.image.url) return p.image.url;
           return null;
         });
-        spawnOrbitingPosts(userId, data.results.length, postCommentCounts, postIds, postDates, postImages);
+        spawnOrbitingPosts(userId, allResults.length, postCommentCounts, postIds, postDates, postImages);
 
         // Render posts grid (using correct field names: content, image)
-        postsGrid.innerHTML = data.results.map((post, idx) => {
+        postsGrid.innerHTML = allResults.map((post, idx) => {
           // Handle image field (can be string URL or Parse File object)
           let mediaUrl = null;
           if (typeof post.image === 'string') {
@@ -3236,6 +3804,7 @@
           } else if (post.image && typeof post.image === 'object' && post.image.url) {
             mediaUrl = post.image.url;
           }
+          const mediaUrlForSrc = getParseFilesProxyUrl(mediaUrl) || mediaUrl;
 
           const hasMedia = mediaUrl && mediaUrl.length > 0;
           const text = post.content || '';
@@ -3244,7 +3813,7 @@
             const safeText = text.slice(0, 100).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             return `
               <div class="post-item loading" data-post-id="${post.objectId}" data-fallback-text="${safeText}" onclick="expandPost('${post.objectId}', '${userId}')">
-                <img src="${mediaUrl}" data-src="${mediaUrl}" crossorigin="anonymous" alt="Post" onload="this.classList.add('loaded'); this.parentElement.classList.remove('loading');" onerror="_imgBlobFallback(this)" />
+                <img src="${mediaUrlForSrc}" data-src="${mediaUrl}" crossorigin="anonymous" alt="Post" onload="this.classList.add('loaded'); this.parentElement.classList.remove('loading');" onerror="_imgBlobFallback(this)" />
               </div>
             `;
           } else {
@@ -3310,7 +3879,9 @@
         }
 
         if (mediaUrl) {
-          fetch(mediaUrl, { mode: 'cors' })
+          const fetchUrl = getParseFilesProxyUrl(mediaUrl) || mediaUrl;
+          const displayUrl = getParseFilesProxyUrl(mediaUrl) || mediaUrl;
+          fetch(fetchUrl, { mode: 'cors' })
             .then(r => r.ok ? r.blob() : Promise.reject(r.status))
             .then(blob => {
               function tryType(mime) {
@@ -3321,13 +3892,13 @@
                 imageEl.onerror = () => {
                   URL.revokeObjectURL(objectUrl);
                   if (mime === 'image/jpeg') tryType('image/png');
-                  else imageEl.src = mediaUrl;
+                  else imageEl.src = displayUrl;
                 };
                 imageEl.src = objectUrl;
               }
               tryType('image/jpeg');
             })
-            .catch(() => { imageEl.src = mediaUrl; });
+            .catch(() => { imageEl.src = displayUrl; });
           imageEl.style.display = 'block';
         } else {
           imageEl.style.display = 'none';
@@ -3468,14 +4039,168 @@
     // Draw glowing connection lines from a user to everyone they've commented to
     function clearActiveConnectionLine() {
       if (activeConnectionLine) {
-        // Remove all line layers (core + glow copies) — each has its own geometry now
-        activeConnectionLine.allSegments.forEach(ls => {
-          scene.remove(ls);
-          ls.geometry.dispose();  // each layer owns its geometry — safe to dispose once
-          ls.material.dispose();
-        });
+        const batches = activeConnectionLine.batches;
+        if (batches) {
+          batches.forEach((b) => {
+            (b.allSegments || []).forEach((ls) => {
+              scene.remove(ls);
+              if (ls.geometry) ls.geometry.dispose();
+              // Do not dispose material — beams share beamLayerMaterials
+            });
+          });
+        } else {
+          (activeConnectionLine.allSegments || []).forEach((ls) => {
+            scene.remove(ls);
+            if (ls.geometry) ls.geometry.dispose();
+          });
+        }
         activeConnectionLine = null;
       }
+    }
+
+    // In-memory cache: loaded comment/engagement data per user so we don't re-fetch. Also used to train codec.
+    const BEAM_CACHE_TTL_MS = 60 * 60 * 1000;  // 1 hour — fewer API calls when revisiting members while navigating
+    const BEAM_CACHE_MAX = 25;                  // LRU cap so FPS doesn't drop as we navigate to many users
+    const POST_CACHE_TTL_MS = 60 * 60 * 1000;   // 1 hour — per-user post cache so revisiting doesn't refetch
+    const POST_CACHE_BY_USER_MAX = 20;          // cap per-user post cache entries
+    const POST_DATA_CACHE_MAX = 4000;           // cap total post metadata (postId -> {...})
+    const beamDataCache = new Map(); // userId -> { engagementCount, postCreatorMap, commentsForCodec, timestamp }
+    window.getBeamCommentCacheForCodec = () => beamDataCache; // so load job can merge into state.comments
+
+    function evictBeamCacheIfNeeded() {
+      if (beamDataCache.size < BEAM_CACHE_MAX) return;
+      let oldestKey = null;
+      let oldestTs = Infinity;
+      beamDataCache.forEach((val, key) => {
+        const ts = val && val.timestamp != null ? val.timestamp : 0;
+        if (ts < oldestTs) { oldestTs = ts; oldestKey = key; }
+      });
+      if (oldestKey != null) beamDataCache.delete(oldestKey);
+    }
+
+    // On-demand loaded posts (planets) — merged into state.posts by load job so codec gets better mass/post counts
+    const postDataCache = new Map(); // postId -> { creator, content, commentCount, created, image }
+    window.getPostCacheForCodec = () => postDataCache;
+    // Per-user post cache: fewer API calls when navigating back to same member
+    const postCacheByUser = new Map(); // userId -> { posts: Array, timestamp }
+    function evictPostCachesIfNeeded() {
+      while (postCacheByUser.size >= POST_CACHE_BY_USER_MAX) {
+        let oldestKey = null;
+        let oldestTs = Infinity;
+        postCacheByUser.forEach((val, key) => {
+          const ts = val && val.timestamp != null ? val.timestamp : 0;
+          if (ts < oldestTs) { oldestTs = ts; oldestKey = key; }
+        });
+        if (oldestKey == null) break;
+        const removed = postCacheByUser.get(oldestKey);
+        postCacheByUser.delete(oldestKey);
+        if (removed && Array.isArray(removed.posts)) {
+          removed.posts.forEach((p) => {
+            const id = p && (p.objectId || p.id);
+            if (id) postDataCache.delete(id);
+          });
+        }
+      }
+      while (postDataCache.size > POST_DATA_CACHE_MAX) {
+        const firstKey = postDataCache.keys().next().value;
+        if (firstKey == null) break;
+        postDataCache.delete(firstKey);
+      }
+    }
+
+    function parseId(val) {
+      if (!val) return null;
+      if (typeof val === 'string') return val;
+      if (typeof val === 'object' && val.objectId) return val.objectId;
+      return null;
+    }
+
+    // Shared beam materials (3 layers) — created once, uniforms updated once per frame for performance
+    let beamLayerMaterials = null;
+
+    function getBeamLayerMaterials() {
+      if (beamLayerMaterials) return beamLayerMaterials;
+      const beamVert = `
+        attribute float aStrength;
+        varying float vLineDist;
+        varying float vStrength;
+        void main() {
+          vLineDist = float(gl_VertexID) * 0.5;
+          vStrength = aStrength;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `;
+      const beamFrag = `
+        uniform float time;
+        uniform float fadeIn;
+        uniform float baseAlpha;
+        uniform float colScale;
+        varying float vLineDist;
+        varying float vStrength;
+        void main() {
+          float pulse = sin(vLineDist * 12.0 - time * 4.0) * 0.5 + 0.5;
+          float thickMult = 1.0 + vStrength * 1.5;
+          float alpha = (0.20 + pulse * 0.65) * baseAlpha * thickMult * fadeIn;
+          vec3 col = mix(vec3(0.55, 0.35, 1.0), vec3(0.85, 0.7, 1.0), pulse) * colScale;
+          col = mix(col, vec3(0.90, 0.80, 1.0), vStrength * 0.4);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `;
+      const layers = [
+        { baseAlpha: 0.12, colScale: 0.65 },
+        { baseAlpha: 0.30, colScale: 0.82 },
+        { baseAlpha: 0.90, colScale: 1.00 },
+      ];
+      beamLayerMaterials = layers.map(({ baseAlpha, colScale }) => new THREE.ShaderMaterial({
+        uniforms: {
+          time: { value: 0 },
+          fadeIn: { value: 0 },
+          baseAlpha: { value: baseAlpha },
+          colScale: { value: colScale },
+        },
+        vertexShader: beamVert,
+        fragmentShader: beamFrag,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        depthTest: false,
+      }));
+      return beamLayerMaterials;
+    }
+
+    /** Create one batch of beam segments (3 layers) and add to scene. Returns { lineSegments, allSegments, targetIndices }. */
+    function addOneBeamBatch(sourceIndex, targetPairsBatch, maxCountForStrength, beamStartTime) {
+      if (targetPairsBatch.length === 0) return null;
+      const vertBuf = new Float32Array(targetPairsBatch.length * 6);
+      const strengthArr = new Float32Array(targetPairsBatch.length * 2);
+      const maxCount = Math.max(maxCountForStrength, 1);
+      targetPairsBatch.forEach(({ count }, i) => {
+        const s = Math.log(1 + count) / Math.log(1 + maxCount);
+        strengthArr[i * 2] = s;
+        strengthArr[i * 2 + 1] = s;
+      });
+      const lineGeo = new THREE.BufferGeometry();
+      lineGeo.setAttribute('position', new THREE.BufferAttribute(vertBuf, 3));
+      lineGeo.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
+      lineGeo.setAttribute('aStrength', new THREE.BufferAttribute(strengthArr, 1));
+      const materials = getBeamLayerMaterials();
+      const allSegments = [];
+      let lineSegments = null;
+      materials.forEach((mat, layerIdx) => {
+        const geo = layerIdx === 0 ? lineGeo : (() => {
+          const g = new THREE.BufferGeometry();
+          g.setAttribute('position', new THREE.BufferAttribute(vertBuf, 3));
+          g.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
+          g.setAttribute('aStrength', new THREE.BufferAttribute(strengthArr.slice(), 1));
+          return g;
+        })();
+        const ls = new THREE.LineSegments(geo, mat);
+        scene.add(ls);
+        allSegments.push(ls);
+        if (layerIdx === materials.length - 1) lineSegments = ls;
+      });
+      const targetIndices = targetPairsBatch.map((p) => p.idx);
+      return { lineSegments, allSegments, targetIndices, lineGeo, vertBuf };
     }
 
     // Helper: fill a supporter card bg element with a profile image (or leave initials)
@@ -3625,17 +4350,31 @@
       }
     }
 
+    const COMMENT_PAGE_SIZE = 150;   // small pages so first beams show quickly
+    const COMMENT_PAGE_SIZE_LARGE = 400; // larger pages once we have many (fewer round trips for 20K users)
+    const MAX_COMMENTS = 15000;
+    const POST_CHUNK = 40;           // smaller post batches for better performance / lower latency
+    const BEAM_BATCH_SIZE = 40;      // add this many new beams per page while loading (then merge to one)
+
+    // Planet LOD: first N get full sprites (with images); the rest are drawn as one Points mesh (no cap on total)
+    const PLANET_SPRITE_LOD = 80;    // full-detail sprites so most planets can load images; beyond this use points
+    // Beam LOD: draw top N strongest connections; full comment count still shown in UI.
+    // Cap scales down for huge connection counts (e.g. 20K comments) to keep FPS smooth.
+    const MAX_BEAM_SEGMENTS = 120;  // max beams when connection count is low
+    function getBeamSegmentCap(uniqueTargetCount) {
+      if (uniqueTargetCount <= 200) return 120;
+      if (uniqueTargetCount <= 1000) return 100;
+      if (uniqueTargetCount <= 5000) return 80;
+      return 60; // 20K+ comments: draw only top 60 for smooth rendering
+    }
+
     async function drawConnectionLines(userId) {
       if (!points || !points.geometry || !points.geometry.attributes.position) return;
 
       const sourceIndex = memberIndexMap.get(userId);
       if (sourceIndex === undefined) return;
 
-      // Snapshot the selected member index at call time — used to detect stale results
-      // after an async fetch that outlasts this selection (user clicked a different star).
       const snapshotSelectedIndex = selectedMemberIndex;
-
-      // Clear previous line immediately (replace, not accumulate)
       clearActiveConnectionLine();
 
       const HEADERS = {
@@ -3643,261 +4382,310 @@
         'X-Parse-REST-API-Key': 'rNXb9qIR6wrZ3n81OG33HVQkpPsXANUatiOE5HSq'
       };
 
+      function stale() {
+        return selectedMemberIndex !== snapshotSelectedIndex;
+      }
+
       try {
-        // ── Paginate comment fetch: cursor-based (createdAt) to avoid Back4App skip limits ──
-        // (skip is often capped at 1000; cursor pagination works for any comment count)
-        const PAGE_SIZE = 500;
-        const MAX_COMMENTS = 15000; // cap for performance; cursor pagination avoids skip limit
+        let engagementCount = {};
+        let postCreatorMap = {};
         let allComments = [];
-        let lastCreatedAt = null; // cursor for next page
-        let keepFetching = true;
-        let commentCreatorQuery = { creator: { __type: 'Pointer', className: '_User', objectId: userId } };
-        let usedPointerQuery = true;
+        const cached = beamDataCache.get(userId);
+        const useCache = cached && (Date.now() - cached.timestamp < BEAM_CACHE_TTL_MS);
 
-        while (keepFetching) {
-          const where = lastCreatedAt
-            ? { $and: [commentCreatorQuery, { createdAt: { $gt: { __type: 'Date', iso: lastCreatedAt } } }] }
-            : commentCreatorQuery;
-          const p = new URLSearchParams({
-            where: JSON.stringify(where),
-            limit: String(PAGE_SIZE),
-            keys: 'creator,post,createdAt',
-            order: 'createdAt',
-          });
-          const resp = await fetch(`https://parseapi.back4app.com/classes/comment?${p}`, { method: 'GET', headers: HEADERS });
-          if (!resp.ok) break;
-          const data = await resp.json();
-          if ((!data.results || data.results.length === 0) && usedPointerQuery && !lastCreatedAt) {
-            commentCreatorQuery = { creator: userId };
-            usedPointerQuery = false;
-            continue;
+        if (useCache) {
+          engagementCount = cached.engagementCount || {};
+          postCreatorMap = cached.postCreatorMap || {};
+          allComments = cached.rawComments || [];
+          if (!stale()) updateDetailBeamsCount(userId, allComments.length);
+        } else {
+          // Fetch comments in pages; add beams incrementally each page (LOD-capped), then merge to one at end.
+          let lastCreatedAt = null;
+          let keepFetching = true;
+          let commentCreatorQuery = { creator: { __type: 'Pointer', className: '_User', objectId: userId } };
+          let usedPointerQuery = true;
+          const drawnTargetIds = new Set();
+          let beamStartTime = null;
+          let maxCountSoFar = 1;
+
+          function resolveMemberIdx(id) {
+            let idx = memberIndexMap.get(id);
+            if (idx !== undefined) return idx;
+            try { idx = memberIndexMap.get(decodeURIComponent(id)); } catch (e) {}
+            return idx;
           }
-          if (!data.results || data.results.length === 0) break;
-          allComments = allComments.concat(data.results);
-          const last = data.results[data.results.length - 1];
-          lastCreatedAt = (last && last.createdAt && last.createdAt.iso) ? last.createdAt.iso : (last && last.createdAt);
-          if (!lastCreatedAt || data.results.length < PAGE_SIZE) keepFetching = false;
-          if (allComments.length >= MAX_COMMENTS) keepFetching = false;
-        }
-        if (allComments.length === 0) return;
 
-        // ── Extract post IDs — Back4App returns `post` as a Parse Pointer object ──
-        // e.g. { __type: "Pointer", className: "post", objectId: "abc123" }
-        // Must unwrap .objectId; plain strings are also handled for safety.
-        function parseId(val) {
-          if (!val) return null;
-          if (typeof val === 'string') return val;
-          if (typeof val === 'object' && val.objectId) return val.objectId;
-          return null;
-        }
+          while (keepFetching) {
+            const pageSize = allComments.length >= 2000 ? COMMENT_PAGE_SIZE_LARGE : COMMENT_PAGE_SIZE;
+            const where = lastCreatedAt
+              ? { $and: [commentCreatorQuery, { createdAt: { $gt: { __type: 'Date', iso: lastCreatedAt } } }] }
+              : commentCreatorQuery;
+            const p = new URLSearchParams({
+              where: JSON.stringify(where),
+              limit: String(pageSize),
+              keys: 'creator,post,createdAt',
+              order: 'createdAt',
+            });
+            const resp = await fetch(`https://parseapi.back4app.com/classes/comment?${p}`, { method: 'GET', headers: HEADERS });
+            if (!resp.ok) break;
+            const data = await resp.json();
+            if ((!data.results || data.results.length === 0) && usedPointerQuery && !lastCreatedAt) {
+              commentCreatorQuery = { creator: userId };
+              usedPointerQuery = false;
+              continue;
+            }
+            if (!data.results || data.results.length === 0) break;
+            allComments = allComments.concat(data.results);
+            const last = data.results[data.results.length - 1];
+            lastCreatedAt = (last && last.createdAt && last.createdAt.iso) ? last.createdAt.iso : (last && last.createdAt);
+            if (!lastCreatedAt || data.results.length < pageSize) keepFetching = false;
+            if (allComments.length >= MAX_COMMENTS) keepFetching = false;
 
-        const postIdSet = new Set(allComments.map(c => parseId(c.post)).filter(Boolean));
-        if (postIdSet.size === 0) return;
-        const allPostIds = [...postIdSet];
+            // Post IDs from this page only (to keep requests small)
+            const pagePostIds = [...new Set(data.results.map(c => parseId(c.post)).filter(Boolean))];
+            if (pagePostIds.length > 0) {
+              for (let pi = 0; pi < pagePostIds.length; pi += POST_CHUNK) {
+                const chunk = pagePostIds.slice(pi, pi + POST_CHUNK);
+                const pp = new URLSearchParams({
+                  where: JSON.stringify({ objectId: { $in: chunk } }),
+                  keys: 'objectId,creator',
+                  limit: String(chunk.length),
+                });
+                const r = await fetch(`https://parseapi.back4app.com/classes/post?${pp}`, { method: 'GET', headers: HEADERS });
+                if (!r.ok) continue;
+                const j = await r.json();
+                (j.results || []).forEach((p) => {
+                  const creatorId = parseId(p.creator);
+                  if (p.objectId && creatorId) postCreatorMap[p.objectId] = creatorId;
+                });
+              }
+            }
+            // Recompute engagement from all comments we have so far
+            engagementCount = {};
+            allComments.forEach((c) => {
+              const postId = parseId(c.post);
+              const creatorId = postId ? postCreatorMap[postId] : null;
+              if (creatorId && creatorId !== userId) {
+                engagementCount[creatorId] = (engagementCount[creatorId] || 0) + 1;
+              }
+            });
 
-        // ── Fetch posts in small chunks to avoid URL length limits (414) ──
-        // 500 IDs in $in can exceed ~2k URL limit; 100 keeps URLs safe and still batches well
-        const POST_CHUNK = 100;
-        const postCreatorMap = {};
-        for (let pi = 0; pi < allPostIds.length; pi += POST_CHUNK) {
-          const chunk = allPostIds.slice(pi, pi + POST_CHUNK);
-          const pp = new URLSearchParams({
-            where: JSON.stringify({ objectId: { $in: chunk } }),
-            keys: 'objectId,creator',
-            limit: String(chunk.length),
-          });
-          const resp = await fetch(`https://parseapi.back4app.com/classes/post?${pp}`, { method: 'GET', headers: HEADERS });
-          if (!resp.ok) continue;
-          const data = await resp.json();
-          (data.results || []).forEach(p => {
-            const creatorId = parseId(p.creator);
-            if (p.objectId && creatorId) postCreatorMap[p.objectId] = creatorId;
-          });
-        }
+            if (!stale()) updateDetailBeamsCount(userId, allComments.length);
 
-        // ── Count engagement per target creator ──
-        const engagementCount = {};
-        allComments.forEach(c => {
-          const postId = parseId(c.post);
-          const creatorId = postId ? postCreatorMap[postId] : null;
-          if (creatorId && creatorId !== userId) {
-            engagementCount[creatorId] = (engagementCount[creatorId] || 0) + 1;
+            // Add another batch of beams this page (LOD-capped; new targets only) so more beams load as data arrives
+            const targetPairs = Object.keys(engagementCount)
+              .map((id) => ({ id, idx: resolveMemberIdx(id), count: engagementCount[id] }))
+              .filter((p) => p.idx !== undefined)
+              .sort((a, b) => b.count - a.count);
+            const segmentCap = getBeamSegmentCap(targetPairs.length);
+            const targetPairsCapped = targetPairs.slice(0, segmentCap);
+            const toDraw = targetPairsCapped.filter((p) => !drawnTargetIds.has(p.id)).slice(0, BEAM_BATCH_SIZE);
+            toDraw.forEach((p) => drawnTargetIds.add(p.id));
+            maxCountSoFar = Math.max(maxCountSoFar, ...targetPairs.map((x) => x.count), 1);
+
+            if (toDraw.length > 0 && !stale()) {
+              if (!beamStartTime) beamStartTime = performance.now();
+              const batch = addOneBeamBatch(sourceIndex, toDraw, maxCountSoFar, beamStartTime);
+              if (batch) {
+                if (!activeConnectionLine) {
+                  activeConnectionLine = { sourceIndex, beamStartTime, batches: [] };
+                }
+                activeConnectionLine.batches.push(batch);
+                updateConnectionLinePositions(); // merges when batches.length > 1
+              }
+            }
           }
-        });
 
-        // ── Collect targets in scene ──
-        const targetIds = Object.keys(engagementCount);
-        // Pair targetIndices with engagement weights, filter to those in scene
-        const targetPairs = targetIds
-          .map(id => ({ id, idx: memberIndexMap.get(id), count: engagementCount[id] }))
-          .filter(p => p.idx !== undefined);
-
-        if (targetPairs.length === 0) return;
-
-        const targetIndices = targetPairs.map(p => p.idx);
-        const targetCounts  = targetPairs.map(p => p.count);
-        const maxCount = Math.max(...targetCounts, 1);
-
-        // ── Render supporter cards ──
-        renderSupporterCards(engagementCount, userId);
-
-        // ── Build per-layer geometries (each layer gets its own BufferGeometry) ──
-        // Using separate geometries per layer avoids THREE.js shared-geometry bugs:
-        // when multiple LineSegments share one geometry, the WebGL VAO/VBO state
-        // can be inconsistently managed, and clearActiveConnectionLine's dispose()
-        // would try to free the same GPU buffer 3 times. Each layer owns its copy.
-        const vertBuf = new Float32Array(targetPairs.length * 6);
-
-        // Per-segment strength attribute (one value per segment = one per vertex pair)
-        // We duplicate it per vertex so the shader gets it at each endpoint
-        const strengthArr = new Float32Array(targetPairs.length * 2);
-        targetPairs.forEach(({ count }, i) => {
-          const s = Math.log(1 + count) / Math.log(1 + maxCount); // 0–1 log-normalised
-          strengthArr[i * 2]     = s;
-          strengthArr[i * 2 + 1] = s;
-        });
-
-        // Factory: make a fresh BufferGeometry for one beam layer.
-        // position data is shared via the same Float32Array (written by updateConnectionLinePositions)
-        // so all layers always render the same segment endpoints.
-        function _makeLayerGeo() {
-          const geo = new THREE.BufferGeometry();
-          const posAttr = new THREE.BufferAttribute(vertBuf, 3);
-          posAttr.setUsage(THREE.DynamicDrawUsage);
-          geo.setAttribute('position', posAttr);
-          geo.setAttribute('aStrength', new THREE.BufferAttribute(strengthArr.slice(), 1));
-          return geo;
+          if (allComments.length === 0) return;
         }
 
-        // Primary geometry reference — used by updateConnectionLinePositions to write positions
-        const lineGeo = _makeLayerGeo();
-
-        // ── Beam shader: pulsing + per-segment thickness via alpha & colour ──
-        const beamVert = `
-          attribute float aStrength;
-          varying float vLineDist;
-          varying float vStrength;
-          void main() {
-            vLineDist = float(gl_VertexID) * 0.5;
-            vStrength = aStrength;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `;
-
-        // Three layers: outer glow, mid, sharp core — thickness scales with engagement
-        const beamLayers = [
-          { baseAlpha: 0.12, colScale: 0.65 }, // wide soft glow
-          { baseAlpha: 0.30, colScale: 0.82 }, // medium halo
-          { baseAlpha: 0.90, colScale: 1.00 }, // bright core
-        ];
-        // Stale-result guard: if the user changed selection while we were fetching,
-        // discard these beam results — they're for a star the user is no longer viewing.
-        if (selectedMemberIndex !== snapshotSelectedIndex) {
+        if (stale()) {
           _dbgLog('BEAMS-STALE discarding userId=' + userId);
           return;
         }
 
-        const allSegments = [];
-        let lineSegments = null;
-        const beamStartTime = performance.now();
-
-        beamLayers.forEach(({ baseAlpha, colScale }, layerIdx) => {
-          const mat = new THREE.ShaderMaterial({
-            uniforms: {
-              time:      { value: 0 },
-              fadeIn:    { value: 0 }, // 0→1 entrance fade over 600ms
-              baseAlpha: { value: baseAlpha },
-              colScale:  { value: colScale },
-            },
-            vertexShader: beamVert,
-            fragmentShader: `
-              uniform float time;
-              uniform float fadeIn;
-              uniform float baseAlpha;
-              uniform float colScale;
-              varying float vLineDist;
-              varying float vStrength;
-              void main() {
-                float pulse = sin(vLineDist * 12.0 - time * 4.0) * 0.5 + 0.5;
-                // Thicker = more opaque: strength boosts alpha 1× to 2.5×
-                float thickMult = 1.0 + vStrength * 1.5;
-                float alpha = (0.20 + pulse * 0.65) * baseAlpha * thickMult * fadeIn;
-                vec3 col = mix(vec3(0.55, 0.35, 1.0), vec3(0.85, 0.7, 1.0), pulse) * colScale;
-                // High-engagement beams shift towards brighter violet
-                col = mix(col, vec3(0.90, 0.80, 1.0), vStrength * 0.4);
-                gl_FragColor = vec4(col, alpha);
-              }
-            `,
-            transparent: true,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            depthTest: false, // beams never occlude anything; disabling avoids depth state interaction with planet sprites
+        // If engagementCount empty but we have comments (e.g. stale cache), recompute from allComments
+        if (Object.keys(engagementCount).length === 0 && allComments.length > 0 && postCreatorMap) {
+          engagementCount = {};
+          allComments.forEach((c) => {
+            const postId = parseId(c.post);
+            const creatorId = postId ? postCreatorMap[postId] : null;
+            if (creatorId && creatorId !== userId) {
+              engagementCount[creatorId] = (engagementCount[creatorId] || 0) + 1;
+            }
           });
-          // First layer uses the primary lineGeo (updated by updateConnectionLinePositions);
-          // subsequent layers get their own geometry copy so each layer has independent
-          // WebGL VAO/VBO state — avoids THREE.js shared-geometry rendering issues.
-          const layerGeo = layerIdx === 0 ? lineGeo : _makeLayerGeo();
-          const ls = new THREE.LineSegments(layerGeo, mat);
-          scene.add(ls);
-          allSegments.push(ls);
-          if (layerIdx === beamLayers.length - 1) lineSegments = ls;
-        });
-
-        {
-          const planetCount = orbitingPosts ? orbitingPosts.children.length : 0;
-          let opacitySnapshot = '';
-          if (orbitingPosts && planetCount > 0) {
-            const s0 = orbitingPosts.children[0];
-            opacitySnapshot = ' op0=' + s0.material.opacity.toFixed(2) + ' fv0=' + s0.userData._fullyVisible + ' inScene=' + scene.children.includes(orbitingPosts);
-          }
-          _dbgLog('BEAMS-ADDED segs=' + allSegments.length + ' planets=' + planetCount + opacitySnapshot);
         }
 
-        activeConnectionLine = {
-          lineSegments, allSegments, sourceIndex, targetIndices, targetIds,
-          beamStartTime,
-          lineGeo,  // primary geometry reference — disposed once on clear
-        };
+        // Render supporter cards from final engagement
+        renderSupporterCards(engagementCount, userId);
 
-        updateConnectionLinePositions();
+        // Resolve member index (try raw id and decoded in case of encoding mismatch)
+        function resolveMemberIdx(id) {
+          let idx = memberIndexMap.get(id);
+          if (idx !== undefined) return idx;
+          try { idx = memberIndexMap.get(decodeURIComponent(id)); } catch (e) {}
+          return idx;
+        }
+
+        // Final beam draw: when using cache we draw once here; when uncached we already drew incrementally in the loop.
+        const targetPairs = Object.keys(engagementCount)
+          .map((id) => ({ id, idx: resolveMemberIdx(id), count: engagementCount[id] }))
+          .filter((p) => p.idx !== undefined)
+          .sort((a, b) => b.count - a.count);
+        const segmentCap = getBeamSegmentCap(targetPairs.length);
+        const targetPairsToDraw = targetPairs.slice(0, segmentCap);
+        const maxCount = Math.max(...targetPairsToDraw.map((p) => p.count), 1);
+        if (targetPairsToDraw.length > 0 && !stale()) {
+          const haveBeamsAlready = activeConnectionLine && activeConnectionLine.batches && activeConnectionLine.batches.length > 0;
+          if (useCache || !haveBeamsAlready) {
+            clearActiveConnectionLine();
+            const beamStartTime = performance.now();
+            const batch = addOneBeamBatch(sourceIndex, targetPairsToDraw, maxCount, beamStartTime);
+            if (batch) {
+              activeConnectionLine = { sourceIndex, beamStartTime, batches: [batch] };
+              updateConnectionLinePositions();
+            }
+          }
+          // uncached with beams already: we added incrementally in the loop; merge already happened in updateConnectionLinePositions
+        }
+
+        // Cache for next time and for codec (so it doesn't have to load again)
+        const commentsForCodec = allComments.map((c) => {
+          const postId = parseId(c.post);
+          const toMember = postId ? postCreatorMap[postId] : null;
+          return toMember && toMember !== userId ? { fromMember: userId, toMember, postId } : null;
+        }).filter(Boolean);
+        evictBeamCacheIfNeeded();
+        beamDataCache.set(userId, {
+          engagementCount,
+          postCreatorMap,
+          rawComments: allComments,
+          commentsForCodec,
+          timestamp: Date.now(),
+        });
 
       } catch (err) {
         console.warn('drawConnectionLines error:', err);
       }
     }
 
-    // Called every frame in animate() to keep lines glued to moving stars
-    function updateConnectionLinePositions() {
+    /** Merge multiple beam batches into one (3 LineSegments total) to reduce draw calls. */
+    function mergeBeamBatches() {
       if (!activeConnectionLine || !points) return;
-      const { lineSegments, allSegments, sourceIndex, targetIndices, beamStartTime } = activeConnectionLine;
+      const batches = activeConnectionLine.batches;
+      if (!batches || batches.length <= 1) return;
       const posArr = points.geometry.attributes.position.array;
-      const buf = lineSegments.geometry.attributes.position.array;
+      const sourceIndex = activeConnectionLine.sourceIndex;
       const sx = posArr[sourceIndex * 3];
       const sy = posArr[sourceIndex * 3 + 1];
       const sz = posArr[sourceIndex * 3 + 2];
-      for (let i = 0; i < targetIndices.length; i++) {
-        const ti = targetIndices[i];
-        const o = i * 6;
-        buf[o]     = sx; buf[o + 1] = sy; buf[o + 2] = sz;
-        buf[o + 3] = posArr[ti * 3];
-        buf[o + 4] = posArr[ti * 3 + 1];
-        buf[o + 5] = posArr[ti * 3 + 2];
+
+      const mergedTargetIndices = batches.flatMap((b) => b.targetIndices);
+      const totalSegments = mergedTargetIndices.length;
+      const mergedPos = new Float32Array(totalSegments * 6);
+      const mergedStrength = new Float32Array(totalSegments * 2);
+      let strengthOffset = 0;
+      for (let b = 0; b < batches.length; b++) {
+        const batch = batches[b];
+        const geom = batch.lineSegments && batch.lineSegments.geometry;
+        if (geom && geom.attributes && geom.attributes.aStrength) {
+          const arr = geom.attributes.aStrength.array;
+          mergedStrength.set(arr, strengthOffset);
+          strengthOffset += arr.length;
+        }
       }
-      // Each layer has its own BufferGeometry but all share the same underlying Float32Array
-      // (vertBuf). Mark all layers' position attributes as needing GPU upload so each
-      // layer renders with the updated positions.
-      allSegments.forEach(ls => {
-        ls.geometry.attributes.position.needsUpdate = true;
+      for (let i = 0; i < mergedTargetIndices.length; i++) {
+        const ti = mergedTargetIndices[i];
+        const o = i * 6;
+        mergedPos[o]     = sx; mergedPos[o + 1] = sy; mergedPos[o + 2] = sz;
+        mergedPos[o + 3] = posArr[ti * 3];
+        mergedPos[o + 4] = posArr[ti * 3 + 1];
+        mergedPos[o + 5] = posArr[ti * 3 + 2];
+      }
+
+      const lineGeo = new THREE.BufferGeometry();
+      lineGeo.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
+      lineGeo.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
+      lineGeo.setAttribute('aStrength', new THREE.BufferAttribute(mergedStrength, 1));
+      const materials = getBeamLayerMaterials();
+      const allSegments = [];
+      let lineSegments = null;
+      materials.forEach((mat, layerIdx) => {
+        const geo = layerIdx === 0 ? lineGeo : (() => {
+          const g = new THREE.BufferGeometry();
+          g.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
+          g.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
+          g.setAttribute('aStrength', new THREE.BufferAttribute(mergedStrength.slice(), 1));
+          return g;
+        })();
+        const ls = new THREE.LineSegments(geo, mat);
+        scene.add(ls);
+        allSegments.push(ls);
+        if (layerIdx === materials.length - 1) lineSegments = ls;
       });
-      // Entrance fade-in: 0→1 over 600ms
+
+      batches.forEach((batch) => {
+        (batch.allSegments || []).forEach((ls) => {
+          scene.remove(ls);
+          if (ls.geometry) ls.geometry.dispose();
+        });
+      });
+      activeConnectionLine.batches = [{
+        lineSegments,
+        allSegments,
+        targetIndices: mergedTargetIndices,
+        lineGeo,
+        vertBuf: mergedPos,
+      }];
+    }
+
+    // Called every frame in animate() to keep lines glued to moving stars (throttled when many beams)
+    function updateConnectionLinePositions() {
+      if (!activeConnectionLine || !points) return;
+      let batches = activeConnectionLine.batches;
+      if (!batches || batches.length === 0) return;
+      if (batches.length > 1) {
+        mergeBeamBatches();
+        batches = activeConnectionLine.batches;
+      }
+      const posArr = points.geometry.attributes.position.array;
+      const sourceIndex = activeConnectionLine.sourceIndex;
+      const beamStartTime = activeConnectionLine.beamStartTime;
+      const sx = posArr[sourceIndex * 3];
+      const sy = posArr[sourceIndex * 3 + 1];
+      const sz = posArr[sourceIndex * 3 + 2];
       const fadeIn = beamStartTime ? Math.min(1, (performance.now() - beamStartTime) / 600) : 1;
       const t = performance.now() / 1000;
-      allSegments.forEach(ls => {
-        if (ls.material.uniforms) {
-          ls.material.uniforms.time.value = t;
-          ls.material.uniforms.fadeIn.value = fadeIn;
+
+      // Update shared beam materials once per frame (all batches use the same 3 materials)
+      // Pause beam pulse animation while user is navigating to keep FPS up
+      if (beamLayerMaterials) {
+        beamLayerMaterials.forEach((mat) => {
+          if (mat.uniforms) {
+            if (!_isNavigating) mat.uniforms.time.value = t;
+            mat.uniforms.fadeIn.value = fadeIn;
+          }
+        });
+      }
+
+      for (let b = 0; b < batches.length; b++) {
+        const { lineSegments, allSegments, targetIndices } = batches[b];
+        if (!lineSegments || !lineSegments.geometry || !allSegments) continue;
+        const buf = lineSegments.geometry.attributes.position.array;
+        for (let i = 0; i < targetIndices.length; i++) {
+          const ti = targetIndices[i];
+          const o = i * 6;
+          buf[o]     = sx; buf[o + 1] = sy; buf[o + 2] = sz;
+          buf[o + 3] = posArr[ti * 3];
+          buf[o + 4] = posArr[ti * 3 + 1];
+          buf[o + 5] = posArr[ti * 3 + 2];
         }
-      });
+        allSegments.forEach(ls => {
+          if (ls && ls.geometry && ls.geometry.attributes && ls.geometry.attributes.position) {
+            ls.geometry.attributes.position.needsUpdate = true;
+          }
+        });
+      }
     }
 
     // Kept for the clear-connections button; also clears active line
@@ -3942,8 +4730,21 @@
         points.material.uniforms.time.value = now / 1000;
       }
 
-      // Animate orbiting post-planets (sprite group) around the selected member
-      if (orbitingPosts && orbitData.length > 0 && orbitHostId && points) {
+      // Throttle beam/planet updates to every 3rd frame to keep FPS high during rotate
+      _heavyUpdateTick++;
+      const doHeavyUpdate = (_heavyUpdateTick % 3 === 0);
+
+      // Don't render or update beams/planets only during travel (fly-to), not during rotate
+      const beamsVisible = !_isTraveling;
+      if (activeConnectionLine && activeConnectionLine.batches) {
+        activeConnectionLine.batches.forEach((b) => {
+          (b.allSegments || []).forEach((ls) => { if (ls) ls.visible = beamsVisible; });
+        });
+      }
+      if (orbitingPosts) orbitingPosts.visible = beamsVisible;
+
+      // Animate orbiting post-planets — skip only during travel (fly-to)
+      if (doHeavyUpdate && !_isTraveling && orbitingPosts && orbitData.length > 0 && orbitHostId && points) {
         const hostIndex = memberIndexMap.get(orbitHostId);
         if (hostIndex !== undefined) {
           const posAttr = points.geometry.attributes.position;
@@ -3952,47 +4753,76 @@
           const hz = posAttr.array[hostIndex * 3 + 2];
 
           const t = now / 1000;
+          const numSprites = orbitingPosts.userData.numPlanetSprites ?? orbitData.length;
 
           for (let i = 0; i < orbitData.length; i++) {
             const o = orbitData[i];
             const a = o.angle + t * o.speed;
-            // Tilted orbit plane
             const cx = Math.cos(a) * o.radius;
             const cy = Math.sin(a) * o.radius;
             const rx = cx * Math.cos(o.tiltZ) - cy * Math.sin(o.tiltX) * Math.sin(o.tiltZ);
             const ry = cx * Math.sin(o.tiltZ) + cy * Math.cos(o.tiltX);
             const rz = cy * Math.sin(o.tiltX);
+            const wx = hx + rx, wy = hy + ry, wz = hz + rz;
 
-            const sprite = orbitingPosts.children[i];
-            if (sprite) {
-              sprite.position.set(hx + rx, hy + ry, hz + rz);
-
-              // Entrance fade-in: ramp opacity 0 → 0.92 over 500ms after _spawnTime
-              if (!sprite.userData._fullyVisible) {
-                const FADE_DURATION = 500; // ms
-                const age = performance.now() - (sprite.userData._spawnTime || 0);
-                if (age <= 0) {
-                  sprite.material.opacity = 0;
-                } else if (age < FADE_DURATION) {
-                  sprite.material.opacity = (age / FADE_DURATION) * 0.92;
+            if (i < numSprites) {
+              const sprite = orbitingPosts.children[i];
+              if (sprite && sprite.isSprite) {
+                sprite.position.set(wx, wy, wz);
+                // Distance-based LOD: compact image size when planet is further from camera
+                const baseScale = sprite.userData._baseScale ?? sprite.scale.x;
+                const dx = wx - camera.position.x, dy = wy - camera.position.y, dz = wz - camera.position.z;
+                const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+                const refD = Math.sqrt((hx - camera.position.x) ** 2 + (hy - camera.position.y) ** 2 + (hz - camera.position.z) ** 2) || 1;
+                const factor = Math.max(0.28, Math.min(1.4, refD / d));
+                const scale = baseScale * factor * (i === selectedPlanetIndex ? 1.35 : 1);
+                sprite.scale.setScalar(scale);
+                // Glow 3x less bright when not selected
+                const targetOpacity = i === selectedPlanetIndex ? 0.92 : 0.92 / 3;
+                if (!sprite.userData._fullyVisible) {
+                  const FADE_DURATION = 500;
+                  const age = performance.now() - (sprite.userData._spawnTime || 0);
+                  if (age <= 0) sprite.material.opacity = 0;
+                  else if (age < FADE_DURATION) sprite.material.opacity = (age / FADE_DURATION) * targetOpacity;
+                  else {
+                    sprite.material.opacity = targetOpacity;
+                    sprite.userData._fullyVisible = true;
+                  }
+                } else if (sprite.material.opacity < 0.1) {
+                  sprite.material.opacity = targetOpacity;
+                  sprite.material.needsUpdate = true;
                 } else {
-                  sprite.material.opacity = 0.92;
-                  sprite.userData._fullyVisible = true; // stop updating every frame
+                  sprite.material.opacity = targetOpacity;
                 }
-              } else if (sprite.material.opacity < 0.1) {
-                // Safety net: if somehow opacity dropped after becoming fully visible, restore it
-                _dbgLog('OPACITY-RESTORE planet ' + i + ' was ' + sprite.material.opacity.toFixed(3));
-                sprite.material.opacity = 0.92;
-                sprite.material.needsUpdate = true;
+              }
+            } else {
+              // LOD overflow: write into Points position buffer (j = i - numSprites)
+              const overflow = orbitingPosts.userData.overflowPoints;
+              if (overflow && overflow.geometry) {
+                const posBuf = overflow.geometry.attributes.position;
+                if (posBuf) {
+                  const j = (i - numSprites) * 3;
+                  posBuf.array[j] = wx;
+                  posBuf.array[j + 1] = wy;
+                  posBuf.array[j + 2] = wz;
+                }
               }
             }
+          }
 
+          if (orbitingPosts.userData.overflowPoints && orbitingPosts.userData.overflowPoints.geometry) {
+            orbitingPosts.userData.overflowPoints.geometry.attributes.position.needsUpdate = true;
           }
         }
       }
 
-      // Update connection lines to follow moving stars
-      updateConnectionLinePositions();
+      // Update connection lines to follow moving stars (throttled; paused only during travel)
+      if (doHeavyUpdate && !_isTraveling) {
+        const beamCount = activeConnectionLine && activeConnectionLine.batches && activeConnectionLine.batches[0]
+          ? activeConnectionLine.batches[0].targetIndices.length : 0;
+        const skipBeamUpdate = beamCount > 80 && (_heavyUpdateTick % 6 !== 0);
+        if (!skipBeamUpdate) updateConnectionLinePositions();
+      }
 
       // Reproject selected star to screen for floating label + update sprite position
       if (selectedMemberIndex !== null && points && selectedLabel) {
@@ -4208,10 +5038,12 @@
       if (confirm('This will reset the job state and snapshot cache, starting from scratch. Continue?')) {
         localStorage.removeItem('universeJobState');
         localStorage.removeItem(SNAPSHOT_KEY);
+        localStorage.removeItem(NAV_CACHE_KEY);
         const el = document.getElementById('snapshot-status');
         if (el) el.textContent = '';
         loadedMemberIds.clear();
         memberIndexMap.clear();
+        usernameToIndexMap.clear();
 
         // Remove all points
         if (points) {
@@ -4427,7 +5259,8 @@
         }
       }
 
-      // If URL has a user id, select that user (e.g. returning to a bookmarked link)
+      syncUsernameToIndexMap();
+      // If URL has a user id or username, select that user (e.g. returning to a bookmarked link)
       if (points && pointMetadata.length > 0) applyUserFromUrl();
     }
 
@@ -4440,6 +5273,9 @@
 
     const SNAPSHOT_KEY = 'universeSnapshot';
     const SNAPSHOT_VERSION = 4; // bumped — invalidate old snapshot so profile pictures re-load from API
+    const NAV_CACHE_KEY = 'universeNavCache';   // beam + post caches so restore = no refetch when navigating
+    const NAV_CACHE_VERSION = 1;
+    const NAV_CACHE_MAX_USERS = 60;            // cap so localStorage doesn't blow up
 
     function loadSnapshot() {
       try {
@@ -4500,6 +5336,33 @@
       try {
         localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
         updateSnapshotStatus(members.length, snap.timestamp);
+        // Persist beam + post caches so after restore we don't refetch when navigating to same members
+        if (typeof beamDataCache !== 'undefined' && typeof postCacheByUser !== 'undefined') {
+          const beamEntries = [];
+          beamDataCache.forEach((cached, userId) => {
+            if (beamEntries.length >= NAV_CACHE_MAX_USERS) return;
+            beamEntries.push({
+              userId,
+              engagementCount: cached.engagementCount || {},
+              postCreatorMap: cached.postCreatorMap || {},
+              commentsForCodec: Array.isArray(cached.commentsForCodec) ? cached.commentsForCodec : [],
+              commentCount: (cached.rawComments && cached.rawComments.length) || 0,
+              timestamp: cached.timestamp || 0,
+            });
+          });
+          const postEntries = [];
+          postCacheByUser.forEach((cached, userId) => {
+            if (postEntries.length >= NAV_CACHE_MAX_USERS) return;
+            postEntries.push({ userId, posts: cached.posts || [], timestamp: cached.timestamp || 0 });
+          });
+          try {
+            localStorage.setItem(NAV_CACHE_KEY, JSON.stringify({
+              version: NAV_CACHE_VERSION,
+              beamCache: beamEntries,
+              postCacheByUser: postEntries,
+            }));
+          } catch (eNav) { /* quota; skip nav cache */ }
+        }
       } catch (e) {
         // localStorage quota exceeded — round-trip coordinates to 3 decimal places to shrink size.
         // NEVER strip proPic — that causes profile images to go blank after restore.
@@ -4584,6 +5447,7 @@
         loadedMemberIds.add(m.id != null ? m.id : String(i));
       });
 
+      syncUsernameToIndexMap();
       // Build geometry + material
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position',    new THREE.BufferAttribute(positions,  3));
@@ -4612,6 +5476,31 @@
       points = new THREE.Points(geometry, material);
       scene.add(points);
 
+      // Restore navigation caches so opening previously visited members doesn't trigger API calls
+      if (typeof beamDataCache !== 'undefined' && typeof postCacheByUser !== 'undefined') {
+        try {
+          const rawNav = localStorage.getItem(NAV_CACHE_KEY);
+          if (rawNav) {
+            const nav = JSON.parse(rawNav);
+            if (nav && nav.version === NAV_CACHE_VERSION) {
+              const now = Date.now();
+              (nav.beamCache || []).forEach((entry) => {
+                beamDataCache.set(entry.userId, {
+                  engagementCount: entry.engagementCount || {},
+                  postCreatorMap: entry.postCreatorMap || {},
+                  commentsForCodec: entry.commentsForCodec || [],
+                  rawComments: entry.commentCount ? Array(entry.commentCount) : [],
+                  timestamp: now, // treat as fresh so we don't refetch when navigating
+                });
+              });
+              (nav.postCacheByUser || []).forEach((entry) => {
+                postCacheByUser.set(entry.userId, { posts: entry.posts || [], timestamp: now });
+              });
+            }
+          }
+        } catch (eNav) { /* ignore */ }
+      }
+
       return members.length;
     }
 
@@ -4627,6 +5516,7 @@
 
     window.clearSnapshot = () => {
       localStorage.removeItem(SNAPSHOT_KEY);
+      localStorage.removeItem(NAV_CACHE_KEY);
       const el = document.getElementById('snapshot-status');
       if (el) el.textContent = 'Snapshot cleared.';
     };
@@ -4648,6 +5538,7 @@
         if (snap && isSyntheticSnapshot(snap)) {
           // Snapshot contains fake/synthetic data (e.g. from old generatePoints) — discard and load real data
           localStorage.removeItem(SNAPSHOT_KEY);
+          localStorage.removeItem(NAV_CACHE_KEY);
           localStorage.removeItem('universeJobState');
           snap = null;
         }
@@ -4667,6 +5558,7 @@
             // If restore yielded 0 members (corrupt or wrong-format snapshot), clear snapshot and fall through to fresh load
             if (restored === 0) {
               localStorage.removeItem(SNAPSHOT_KEY);
+              localStorage.removeItem(NAV_CACHE_KEY);
               skips = { userSkip: 0, postSkip: 0, commentSkip: 0, totalMembers: 0, isComplete: false };
               localStorage.removeItem('universeJobState');
             }
@@ -4756,7 +5648,40 @@
           await new Promise(resolve => setTimeout(resolve, 100));
         }
 
-        // 5. Compute spatial positions if we have members
+        // 5. Merge beam-loaded comments and on-demand loaded posts into state so codec uses them (no need to re-fetch)
+        const beamCache = typeof getBeamCommentCacheForCodec === 'function' ? getBeamCommentCacheForCodec() : null;
+        if (beamCache && state.comments) {
+          beamCache.forEach((cached, userId) => {
+            const list = cached.commentsForCodec;
+            if (Array.isArray(list)) {
+              list.forEach((c, i) => {
+                if (c && c.fromMember && c.toMember) {
+                  state.comments.set('beam_' + userId + '_' + i, {
+                    fromMember: c.fromMember,
+                    toMember: c.toMember,
+                    postId: c.postId || null,
+                  });
+                }
+              });
+            }
+          });
+        }
+        const postCache = typeof getPostCacheForCodec === 'function' ? getPostCacheForCodec() : null;
+        if (postCache && state.posts) {
+          postCache.forEach((p, postId) => {
+            if (p && p.creator && !state.posts.has(postId)) {
+              state.posts.set(postId, {
+                creator: p.creator,
+                content: p.content || '',
+                commentCount: p.commentCount || 0,
+                created: p.created,
+                image: p.image ?? null,
+              });
+            }
+          });
+        }
+
+        // 6. Compute spatial positions if we have members
         if (state.members.size > 0) {
           updateJob(job.id, { message: 'Computing spatial layout...', progress: 90 });
 
@@ -4764,16 +5689,37 @@
             evolve(state, DEFAULT_PARAMS);
           }
 
-          // 6. Enrich point cloud incrementally
+          // 7. Enrich point cloud incrementally
           updateJob(job.id, { message: 'Updating visualization...', progress: 95 });
           enrichPointCloudData(state);
 
-          // 7. Save snapshot so next load is instant
+          // 8. Save snapshot so next load is instant
           updateJob(job.id, { message: 'Saving snapshot...', progress: 97 });
           saveSnapshot(skips);
+
+          // 9. Background training: extra evolution steps so more comments = more gravity (pairs pulled closer)
+          const TRAIN_STEPS = 6;
+          let trainStep = 0;
+          function runTrainingStep() {
+            if (trainStep >= TRAIN_STEPS) {
+              const msg = skips.isComplete ? `Loaded all ${skips.totalMembers} members` : `Loaded ${skips.totalMembers} members (will continue on next run)`;
+              updateJob(job.id, { message: msg, progress: skips.isComplete ? 100 : Math.min(95, (skips.totalMembers / MAX_MEMBERS) * 100) });
+              return;
+            }
+            trainStep++;
+            updateJob(job.id, { message: `Refining layout (comment gravity) ${trainStep}/${TRAIN_STEPS}...`, progress: 97 });
+            evolve(state, DEFAULT_PARAMS);
+            enrichPointCloudData(state);
+            saveSnapshot(skips);
+            const cb = typeof requestIdleCallback !== 'undefined' ? requestIdleCallback : (fn) => setTimeout(fn, 50);
+            cb(runTrainingStep, { timeout: 200 });
+          }
+          if (state.comments && state.comments.size > 0) {
+            runTrainingStep();
+          }
         }
 
-        // 8. Update UI
+        // 10. Update UI
         const realCount = loadedMemberIds.size;
         document.getElementById('admin-total').textContent = realCount.toLocaleString();
         document.getElementById('admin-real').textContent = realCount.toLocaleString();
