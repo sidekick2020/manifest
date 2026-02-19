@@ -6,6 +6,12 @@
 
 ---
 
+## For AI agents
+
+**Start here:** [AGENTS.md](./AGENTS.md) — entry points, directory layout, conventions, and common tasks. See also [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for data flow and module roles. Cursor rules in `.cursor/rules/` apply when working in the repo.
+
+---
+
 ## Launching the app
 
 **Source of truth:** `test-point-cloud.html` — the single self-contained app. No build step required.
@@ -19,9 +25,12 @@ npm install
 npm run dev
 ```
 
-Then open **`http://localhost:5173/`** or **`http://localhost:5173/test-point-cloud.html`** in your browser. The root `/` redirects to the app.
+Then open in your browser:
 
-> If port 5173 is taken, Vite will pick the next available port (5174, 5175, …). Check the terminal output for the exact URL.
+- **`http://localhost:5174/`** — React app (training/dashboard by default; point-cloud shell at `/#point-cloud`)
+- **`http://localhost:5174/test-point-cloud.html`** — Vanilla point cloud app (source of truth)
+
+> Default port is 5174. If it's taken, use `npm run dev -- --port <port>` or check the terminal for the URL.
 
 ### Option 2 — Any static file server
 
@@ -105,7 +114,8 @@ Upload the contents of `dist/` to any static host (GitHub Pages, Cloudflare Page
 ## Project structure
 
 ```
-test-point-cloud.html   ← App (source of truth, single file, self-contained)
+public/
+  test-point-cloud.html ← Vanilla point cloud app (source of truth); served static, no transform
 lib/                    ← Shared JS modules
   back4app.js           ← Back4App REST client
   codec.js              ← Spatial hash encode/evolve
@@ -168,7 +178,7 @@ PARSE_APP_ID=xxx PARSE_REST_KEY=yyy npm run training
 **Fix:** When the app origin is localhost (or 127.0.0.1), we avoid cross-origin requests by routing all Parse CDN image URLs through a **same-origin proxy**:
 
 1. **Vite dev server** (`vite.config.js`): the path `/parsefiles-proxy` is proxied to `https://parsefiles.back4app.com`. Requests to `http://localhost:5173/parsefiles-proxy/...` are forwarded by Vite to the CDN; the browser only sees a same-origin request.
-2. **App code** (`test-point-cloud.html`): the helper **`getParseFilesProxyUrl(url)`** rewrites any `https://parsefiles.back4app.com/...` URL to `/parsefiles-proxy/...` when `window.location.origin` is localhost. Use this for **every** place that loads an image from the Parse CDN:
+2. **App code** (`public/test-point-cloud.html`): the helper **`getParseFilesProxyUrl(url)`** rewrites any `https://parsefiles.back4app.com/...` URL to `/parsefiles-proxy/...` when `window.location.origin` is localhost. Use this for **every** place that loads an image from the Parse CDN:
    - Profile pictures (sidebar, star sprites, cache)
    - Post grid thumbnails and expanded post image
    - Orbiting planet textures (`_makePlanetTextureFromImage`, planet image batch)
@@ -201,4 +211,4 @@ PARSE_APP_ID=xxx PARSE_REST_KEY=yyy npm run training
 - **Merge on-demand data:** Merge `beamDataCache` (and, if added, on-demand posts) into `state.comments` / `state.posts` before `evolve()` and before saving the snapshot. Then one load + merge gives the codec everything already fetched; the next session restores from snapshot and doesn’t need to re-request that data.
 - **Runtime load job:** Use one or two large batches (e.g. 1000 users, 1000 posts, 2500 comments per batch) instead of many small ones so the initial codec run needs only 3–6 API calls.
 
-- **Fewer API calls while navigating:** The app (e.g. `test-point-cloud.html`) reduces navigation API calls by: (1) **Beam cache** — 1‑hour TTL so revisiting a member reuses cached beams; (2) **Per-user post cache** — posts for a member are cached (1‑hour TTL) so reopening that member doesn’t refetch; (3) **Navigation cache persistence** — when the load job saves a snapshot, it also saves the beam and post caches (capped to 60 users) to `universeNavCache`. On restore from snapshot, those caches are repopulated so opening previously visited members uses cache and triggers no API calls.
+- **Fewer API calls while navigating:** The app (e.g. `public/test-point-cloud.html`) reduces navigation API calls by: (1) **Beam cache** — 1‑hour TTL so revisiting a member reuses cached beams; (2) **Per-user post cache** — posts for a member are cached (1‑hour TTL) so reopening that member doesn’t refetch; (3) **Navigation cache persistence** — when the load job saves a snapshot, it also saves the beam and post caches (capped to 60 users) to `universeNavCache`. On restore from snapshot, those caches are repopulated so opening previously visited members uses cache and triggers no API calls.

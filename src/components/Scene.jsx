@@ -737,7 +737,7 @@ export function Scene() {
 
       // Performance monitoring (log every 5 seconds)
       if (Math.floor(time) % 5 === 0 && Math.floor(time * 10) % 10 === 0) {
-        const visibleCount = visibleMembers ? visibleMembers.length : 0;
+        const visibleCount = visibleItems ? visibleItems.length : 0;
         const slicePercent = members.size > 0 ? Math.round((slicedMembers.size / members.size) * 100) : 0;
         const culledPercent = slicedMembers.size > 0 ? Math.round((1 - visibleCount / slicedMembers.size) * 100) : 0;
         console.log(`[Scene] Total: ${members.size}, Sliced: ${slicedMembers.size} (${slicePercent}%), Visible: ${visibleCount} (culled ${culledPercent}%)`);

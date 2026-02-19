@@ -11,9 +11,21 @@ export default defineConfig({
         server.middlewares.use((req, res, next) => {
           const path = req.url?.split('?')[0] || '';
           const isRoot = path === '/' || path === '';
-          const isViteInternal = path.startsWith('/@') || path.startsWith('/node_modules/');
-          const isPathRoute = path.startsWith('/') && !path.includes('.') && path !== '/parse-api' && path.indexOf('/parsefiles-proxy') !== 0;
-          if ((isRoot || isPathRoute) && !isViteInternal) req.url = '/test-point-cloud.html';
+          // Don't rewrite Vite internals (/@vite/client, /@react-refresh, /@id/...), source files, or API proxies
+          const isViteInternal = path.startsWith('/@') || path.startsWith('/node_modules/') || path.startsWith('/src/');
+          const isPathRoute =
+            path.startsWith('/') &&
+            !path.includes('.') &&
+            path !== '/parse-api' &&
+            path.indexOf('/parsefiles-proxy') !== 0 &&
+            !isViteInternal;
+          // Root path: serve index.html so the React app loads and can read the hash client-side
+          // (e.g. /#point-cloud). Hash is never sent to the server, so we must serve React at /.
+          if (isRoot) {
+            req.url = '/index.html';
+          } else if (isPathRoute) {
+            req.url = '/test-point-cloud.html';
+          }
           next();
         });
       },
@@ -23,17 +35,16 @@ export default defineConfig({
   publicDir: 'public',
   build: {
     rollupOptions: {
-      input: {
-        main: resolve(__dirname, 'index.html'),
-        'test-point-cloud': resolve(__dirname, 'test-point-cloud.html'),
-      },
+      input: resolve(__dirname, 'index.html'),
     },
   },
+  // test-point-cloud.html lives in public/ so it is served static (no transform). Avoids
+  // Vite running import-analysis on it when it was a rollup input.
   optimizeDeps: {
-    entries: ['./index.html', './test-point-cloud.html'],
+    entries: ['./index.html'],
   },
   server: {
-    port: 5173,
+    port: 5174,
     proxy: {
       '/parse-api': {
         target: 'https://parseapi.back4app.com',

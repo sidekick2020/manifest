@@ -1,1406 +1,5 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Point Cloud Performance Test</title>
-  <style>
-    :root {
-      /* Colors */
-      --color-bg-primary: #0a0a1a;
-      --color-bg-panel: rgba(10, 10, 26, 0.95);
-      --color-bg-button: rgba(26, 26, 46, 0.7);
-      --color-border: #1a1a2e;
-      --color-border-light: #333;
-      --color-text-primary: #ffffff;
-      --color-text-secondary: #999999;
-      --color-accent: #a78bfa;
-      --color-accent-hover: #c4b5fd;
-      --color-danger: #ff4444;
-
-      /* Typography */
-      --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-      --font-size-xs: 12px;
-      --font-size-sm: 13px;
-      --font-size-base: 14px;
-      --font-size-lg: 16px;
-      --font-size-xl: 18px;
-      --font-weight-normal: 400;
-      --font-weight-medium: 500;
-      --font-weight-bold: 700;
-
-      /* Spacing */
-      --spacing-xs: 8px;
-      --spacing-sm: 12px;
-      --spacing-md: 16px;
-      --spacing-lg: 20px;
-      --spacing-xl: 24px;
-
-      /* Border & Shadow */
-      --border-radius-sm: 8px;
-      --border-radius-md: 12px;
-      --border-radius-lg: 16px;
-      --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.6);
-      --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.3);
-    }
-
-    body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      background: var(--color-bg-primary);
-      color: var(--color-text-primary);
-      font-family: var(--font-family);
-      font-size: var(--font-size-base);
-      line-height: 1.5;
-      -webkit-tap-highlight-color: transparent;
-      -webkit-touch-callout: none;
-      touch-action: manipulation;
-    }
-    canvas {
-      display: block;
-    }
-    /* Loading screen — shown when navigating directly to a user via URL */
-    #loading-screen {
-      position: fixed;
-      inset: 0;
-      z-index: 10000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(10, 10, 26, 0.75);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      transition: opacity 0.6s ease, visibility 0.6s ease;
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-    #loading-screen.visible {
-      opacity: 1;
-      visibility: visible;
-      pointer-events: auto;
-    }
-    #loading-screen.hidden {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-    #loading-screen .loading-content {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 0.5em;
-      text-align: center;
-    }
-    #loading-screen .loading-title {
-      font-size: clamp(2.5rem, 8vw, 4rem);
-      font-weight: 700;
-      color: var(--color-accent);
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      text-shadow: 0 0 40px rgba(167, 139, 250, 0.4);
-    }
-    #loading-screen .loading-tagline {
-      font-size: clamp(1rem, 3vw, 1.35rem);
-      font-weight: 500;
-      color: rgba(255, 255, 255, 0.85);
-      letter-spacing: 0.12em;
-      opacity: 0;
-      transform: translateY(8px);
-      animation: loading-tagline-in 0.8s ease 0.6s forwards;
-    }
-    @keyframes loading-tagline-in {
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-    button {
-      margin: 5px 0;
-      padding: 8px 16px;
-      min-height: 44px;
-      background: #333;
-      color: #fff;
-      border: 1px solid #666;
-      border-radius: 3px;
-      cursor: pointer;
-      width: 100%;
-      font-size: 13px;
-      -webkit-tap-highlight-color: transparent;
-    }
-    button:hover {
-      background: #444;
-    }
-    button.active {
-      background: #0a0;
-      color: #000;
-    }
-    #search {
-      position: absolute;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 100;
-      width: min(520px, 92vw);
-    }
-    /* Floating username label anchored to selected star */
-    #star-label {
-      position: fixed;
-      pointer-events: none;
-      display: none;
-      z-index: 50;
-      transform: translate(-50%, calc(-100% - 22px));
-      white-space: nowrap;
-      text-align: center;
-    }
-    #star-label .star-label-name {
-      display: inline-block;
-      background: rgba(8, 8, 22, 0.82);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 20px;
-      padding: 3px 12px 3px 8px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #fff;
-      letter-spacing: 0.02em;
-      backdrop-filter: blur(8px);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    #star-label .star-label-pip {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: #fff;
-      flex-shrink: 0;
-      opacity: 0.7;
-    }
-
-    #clear-connections-btn {
-      position: absolute;
-      top: 72px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 100;
-      background: rgba(0, 204, 255, 0.15);
-      border: 1px solid rgba(0, 204, 255, 0.4);
-      border-radius: 20px;
-      color: #00ccff;
-      font-family: var(--font-family);
-      font-size: var(--font-size-sm);
-      padding: 6px 16px;
-      cursor: pointer;
-      transition: background 0.2s ease, color 0.2s ease;
-      backdrop-filter: blur(4px);
-      white-space: nowrap;
-    }
-    #clear-connections-btn:hover {
-      background: rgba(0, 204, 255, 0.3);
-      color: #ffffff;
-    }
-    #search input {
-      width: 100%;
-      padding: 16px 24px;
-      background: var(--color-bg-button);
-      border: 1px solid var(--color-border-light);
-      border-radius: 28px;
-      color: var(--color-text-primary);
-      font-family: var(--font-family);
-      font-size: 16px;
-      outline: none;
-      transition: all 0.2s ease;
-      box-sizing: border-box;
-    }
-    #search input:focus {
-      border-color: var(--color-accent);
-      background: rgba(26, 26, 46, 0.9);
-      box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
-    }
-    #search input::placeholder {
-      color: var(--color-text-secondary);
-    }
-    /* Search Autocomplete Dropdown */
-    #search-dropdown {
-      position: absolute;
-      top: 100%;
-      left: 0;
-      right: 0;
-      margin-top: 8px;
-      background: var(--color-bg-panel);
-      border: 1px solid var(--color-border-light);
-      border-radius: var(--border-radius-md);
-      max-height: 400px;
-      overflow-y: auto;
-      display: none;
-      z-index: 101;
-      box-shadow: var(--shadow-panel);
-      backdrop-filter: blur(12px);
-    }
-    #search-dropdown.visible {
-      display: block;
-    }
-    .search-result-item {
-      display: flex;
-      align-items: center;
-      padding: 12px 16px;
-      cursor: pointer;
-      transition: background 0.2s ease;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    .search-result-item:last-child {
-      border-bottom: none;
-    }
-    .search-result-item:hover {
-      background: rgba(0, 204, 102, 0.1);
-    }
-    .search-result-item.selected {
-      background: rgba(0, 204, 102, 0.15);
-    }
-    .search-result-avatar {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: var(--color-accent);
-      color: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: var(--font-weight-bold);
-      font-size: 14px;
-      margin-right: 12px;
-      flex-shrink: 0;
-      border: 2px solid rgba(0, 204, 102, 0.3);
-      position: relative;
-      overflow: hidden;
-    }
-    .search-result-avatar img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      border-radius: 50%;
-      object-fit: cover;
-      object-position: center;
-      opacity: 0;
-      transition: opacity 0.3s ease-in-out;
-    }
-    .search-result-avatar img.loaded {
-      opacity: 1;
-    }
-    .search-result-avatar.loading {
-      background: linear-gradient(
-        90deg,
-        var(--color-accent) 0%,
-        rgba(0, 204, 102, 0.6) 50%,
-        var(--color-accent) 100%
-      );
-      background-size: 200% 100%;
-      animation: shimmer 1.5s infinite;
-    }
-    @keyframes shimmer {
-      0% { background-position: -200% 0; }
-      100% { background-position: 200% 0; }
-    }
-    .search-result-info {
-      flex: 1;
-      min-width: 0;
-    }
-    .search-result-username {
-      font-weight: var(--font-weight-medium);
-      color: var(--color-text-primary);
-      font-size: var(--font-size-base);
-      margin-bottom: 2px;
-    }
-    .search-result-meta {
-      font-size: var(--font-size-xs);
-      color: var(--color-text-secondary);
-    }
-    .search-result-highlight {
-      background: rgba(0, 204, 102, 0.3);
-      font-weight: var(--font-weight-bold);
-    }
-    #detail {
-      position: fixed;
-      top: 0;
-      right: -500px; /* Hidden off-screen (width + padding + shadow) */
-      width: 400px;
-      max-width: 33.333vw;
-      height: 100vh;
-      background: var(--color-bg-panel);
-      border-left: 2px solid var(--color-accent);
-      border-top-left-radius: var(--border-radius-lg);
-      border-bottom-left-radius: var(--border-radius-lg);
-      color: var(--color-text-primary);
-      z-index: 150;
-      padding: 30px;
-      overflow-y: auto;
-      transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                  filter 0.18s ease,
-                  opacity 0.18s ease;
-      box-shadow: var(--shadow-panel);
-    }
-    #detail.visible {
-      right: 0;
-    }
-    #detail.content-transitioning {
-      filter: blur(6px);
-      opacity: 0.35;
-      pointer-events: none;
-    }
-    .detail-drag-handle {
-      display: none; /* shown only in mobile media query */
-    }
-    #detail .close {
-      position: absolute;
-      top: 15px;
-      right: 20px;
-      cursor: pointer;
-      color: var(--color-text-secondary);
-      font-size: 30px;
-      transition: color 0.2s ease;
-    }
-    #detail .close:hover {
-      color: var(--color-accent);
-    }
-    #detail h3 {
-      margin: 0 0 20px 0;
-      color: var(--color-accent);
-      font-size: var(--font-size-xl);
-      font-weight: var(--font-weight-bold);
-    }
-    #detail p {
-      margin: 8px 0;
-      font-size: var(--font-size-sm);
-      line-height: 1.6;
-    }
-    #detail strong {
-      color: var(--color-text-secondary);
-      font-weight: var(--font-weight-medium);
-    }
-    /* Profile Picture in Detail Panel */
-    .detail-header {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      margin-bottom: 20px;
-      padding-bottom: 20px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    .detail-header-info {
-      text-align: center;
-      width: 100%;
-    }
-    .detail-header-info h3 {
-      margin: 0 0 8px 0;
-      text-align: center;
-    }
-    .detail-avatar {
-      width: 120px;
-      height: 120px;
-      border-radius: 50%;
-      background: var(--color-accent);
-      color: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: var(--font-weight-bold);
-      font-size: 48px;
-      margin: 0 auto 16px;
-      flex-shrink: 0;
-      border: 4px solid rgba(0, 204, 102, 0.3);
-      position: relative;
-      overflow: hidden;
-    }
-    .detail-avatar img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      border-radius: 50%;
-      object-fit: cover;
-      object-position: center;
-      opacity: 0;
-      transition: opacity 0.3s ease-in-out;
-    }
-    .detail-avatar img.loaded {
-      opacity: 1;
-    }
-    .detail-avatar.loading {
-      background: linear-gradient(
-        90deg,
-        var(--color-accent) 0%,
-        rgba(0, 204, 102, 0.6) 50%,
-        var(--color-accent) 100%
-      );
-      background-size: 200% 100%;
-      animation: shimmer 1.5s infinite;
-    }
-    .detail-header-info h3 {
-      margin: 0 0 4px 0;
-    }
-    .detail-header-id {
-      font-size: var(--font-size-sm);
-      color: var(--color-text-secondary);
-    }
-
-    /* Beams & Planets — highlighted stat cards in user panel */
-    .detail-stats {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 16px;
-      padding: 14px 0;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .detail-stat-card {
-      flex: 1;
-      min-width: 120px;
-      padding: 12px 14px;
-      border-radius: var(--border-radius-md);
-      background: linear-gradient(145deg, rgba(167, 139, 250, 0.12), rgba(167, 139, 250, 0.04));
-      border: 1px solid rgba(167, 139, 250, 0.25);
-      text-align: center;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-    .detail-stat-card:hover {
-      border-color: rgba(167, 139, 250, 0.4);
-      box-shadow: 0 0 20px rgba(167, 139, 250, 0.12);
-    }
-    .detail-stat-card.beams {
-      border-color: rgba(0, 204, 255, 0.3);
-      background: linear-gradient(145deg, rgba(0, 204, 255, 0.1), rgba(0, 204, 255, 0.03));
-    }
-    .detail-stat-card.beams:hover {
-      border-color: rgba(0, 204, 255, 0.45);
-      box-shadow: 0 0 20px rgba(0, 204, 255, 0.12);
-    }
-    .detail-stat-card.planets {
-      border-color: rgba(255, 193, 7, 0.35);
-      background: linear-gradient(145deg, rgba(255, 193, 7, 0.1), rgba(255, 193, 7, 0.03));
-    }
-    .detail-stat-card.planets:hover {
-      border-color: rgba(255, 193, 7, 0.5);
-      box-shadow: 0 0 20px rgba(255, 193, 7, 0.12);
-    }
-    .detail-stat-icon {
-      font-size: 1.5rem;
-      line-height: 1;
-      margin-bottom: 4px;
-    }
-    .detail-stat-value {
-      display: block;
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: var(--color-text-primary);
-      letter-spacing: 0.02em;
-    }
-    .detail-stat-label {
-      display: block;
-      font-size: var(--font-size-xs);
-      font-weight: 600;
-      color: var(--color-text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-top: 2px;
-    }
-    .detail-stat-desc {
-      font-size: 11px;
-      color: var(--color-text-secondary);
-      margin-top: 6px;
-      line-height: 1.3;
-    }
-
-    #detail .risk-low { color: #4af; }
-    #detail .risk-medium { color: #fa0; }
-    #detail .risk-high { color: #f44; }
-
-    /* Instagram-style post grid */
-    /* Supporter playing cards — portrait shape, stacked deck */
-    .supporter-card {
-      position: absolute;
-      top: 0;
-      left: 50%;
-      width: 100px;
-      height: 140px;
-      border-radius: 10px;
-      overflow: hidden;
-      cursor: pointer;
-      border: 1.5px solid rgba(167,139,250,0.35);
-      box-shadow: 0 4px 18px rgba(0,0,0,0.55);
-      transform-origin: bottom center;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .supporter-card:hover {
-      box-shadow: 0 8px 28px rgba(167,139,250,0.45);
-      border-color: rgba(167,139,250,0.7);
-    }
-    .supporter-card-bg {
-      position: absolute; inset: 0;
-      background: linear-gradient(160deg, rgba(30,20,60,0.9), rgba(10,8,30,0.97));
-      overflow: hidden;
-    }
-    .supporter-card-bg img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      object-position: center;
-      opacity: 0.75;
-    }
-    .supporter-card-initials {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 32px; font-weight: 700; color: rgba(167,139,250,0.6);
-      letter-spacing: -0.02em;
-    }
-    .supporter-card-overlay {
-      position: absolute; inset: 0;
-      background: linear-gradient(to top, rgba(8,6,24,0.92) 0%, rgba(8,6,24,0.2) 55%, transparent 100%);
-    }
-    .supporter-card-label {
-      position: absolute;
-      bottom: 0; left: 0; right: 0;
-      padding: 8px 7px 7px;
-      display: flex; flex-direction: column; gap: 1px;
-    }
-    .supporter-card-name {
-      font-size: 11px; font-weight: 700; color: #fff;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
-      letter-spacing: 0.01em;
-    }
-    .supporter-card-count {
-      font-size: 10px; color: var(--color-accent);
-      font-weight: 500;
-    }
-
-    .posts-section {
-      margin-top: 24px;
-      padding-top: 20px;
-      border-top: 1px solid var(--color-border);
-    }
-    .posts-section h4 {
-      margin: 0 0 16px 0;
-      color: var(--color-text-primary);
-      font-size: var(--font-size-base);
-      font-weight: var(--font-weight-medium);
-    }
-    .posts-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 4px;
-      margin-bottom: 16px;
-    }
-    .post-item {
-      aspect-ratio: 1;
-      background: var(--color-border);
-      border-radius: 4px;
-      overflow: hidden;
-      cursor: pointer;
-      position: relative;
-      transition: transform 0.2s ease;
-    }
-    .post-item:hover {
-      transform: scale(1.05);
-      z-index: 1;
-    }
-    .post-item img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      object-position: center;
-      opacity: 0;
-      transition: opacity 0.3s ease-in-out;
-    }
-    .post-item img.loaded {
-      opacity: 1;
-    }
-    .post-item.loading {
-      background: linear-gradient(
-        90deg,
-        var(--color-border) 0%,
-        rgba(26, 26, 46, 0.6) 50%,
-        var(--color-border) 100%
-      );
-      background-size: 200% 100%;
-      animation: shimmer 1.5s infinite;
-    }
-    .post-item .post-text {
-      position: absolute;
-      inset: 0;
-      padding: 8px;
-      font-size: 11px;
-      line-height: 1.3;
-      color: var(--color-text-primary);
-      background: rgba(10, 10, 26, 0.85);
-      backdrop-filter: blur(4px);
-      display: -webkit-box;
-      -webkit-line-clamp: 6;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .posts-loading {
-      text-align: center;
-      padding: 20px;
-      color: var(--color-text-secondary);
-      font-size: var(--font-size-sm);
-    }
-
-    /* Expanded Post View */
-    #post-expanded {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: var(--color-bg-panel);
-      z-index: 10;
-      overflow-y: auto;
-      transform: translateY(100%);
-      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      display: none;
-    }
-    #post-expanded.visible {
-      transform: translateY(0);
-      display: block;
-    }
-    .post-expanded-back {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      z-index: 20;
-      background: rgba(10, 10, 26, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 50%;
-      color: var(--color-text-primary);
-      font-size: 20px;
-      width: 40px;
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: background 0.2s ease, color 0.2s ease;
-      backdrop-filter: blur(4px);
-      line-height: 1;
-    }
-    .post-expanded-back:hover {
-      background: rgba(0, 204, 102, 0.2);
-      color: var(--color-accent);
-    }
-    .post-expanded-content {
-      padding: 0;
-    }
-    .post-expanded-image {
-      width: 100%;
-      max-height: 400px;
-      object-fit: cover;
-      object-position: center;
-      display: block;
-    }
-    .post-expanded-text {
-      padding: 20px;
-      font-size: var(--font-size-base);
-      line-height: 1.6;
-      color: var(--color-text-primary);
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
-    .post-expanded-meta {
-      padding: 0 20px 20px 20px;
-      font-size: var(--font-size-sm);
-      color: var(--color-text-secondary);
-      border-bottom: 1px solid var(--color-border);
-    }
-    .post-comments-section {
-      padding: 20px;
-    }
-    .post-comments-header {
-      font-size: var(--font-size-lg);
-      font-weight: var(--font-weight-bold);
-      color: var(--color-text-primary);
-      margin: 0 0 16px 0;
-    }
-    .comment-item {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 20px;
-      padding-bottom: 20px;
-      border-bottom: 1px solid var(--color-border);
-    }
-    .comment-item:last-child {
-      border-bottom: none;
-    }
-    .comment-avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: var(--color-accent);
-      color: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: var(--font-weight-bold);
-      font-size: 16px;
-      flex-shrink: 0;
-      overflow: hidden;
-      position: relative;
-    }
-    .comment-avatar img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      object-position: center;
-    }
-    .comment-content {
-      flex: 1;
-      min-width: 0;
-    }
-    .comment-header {
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-      margin-bottom: 4px;
-    }
-    .comment-username {
-      font-weight: var(--font-weight-medium);
-      color: var(--color-text-primary);
-      font-size: var(--font-size-base);
-    }
-    .comment-date {
-      font-size: var(--font-size-xs);
-      color: var(--color-text-secondary);
-    }
-    .comment-text {
-      font-size: var(--font-size-sm);
-      line-height: 1.5;
-      color: var(--color-text-primary);
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
-    .comments-loading {
-      text-align: center;
-      padding: 20px;
-      color: var(--color-text-secondary);
-      font-size: var(--font-size-sm);
-    }
-    #help {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: var(--color-bg-panel);
-      border: 2px solid var(--color-accent);
-      border-radius: var(--border-radius-lg);
-      padding: 30px;
-      color: var(--color-text-primary);
-      z-index: 200;
-      display: none;
-      max-width: 600px;
-      backdrop-filter: blur(12px);
-      box-shadow: var(--shadow-panel);
-    }
-    #help.visible {
-      display: block;
-    }
-    #help h2 {
-      margin: 0 0 20px 0;
-      color: var(--color-accent);
-      font-weight: var(--font-weight-bold);
-      font-size: var(--font-size-xl);
-      text-align: center;
-    }
-    #help .shortcuts {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 10px;
-      margin: 20px 0;
-    }
-    #help .key {
-      background: #333;
-      padding: 5px 10px;
-      border-radius: 3px;
-      font-family: monospace;
-      font-size: 12px;
-      text-align: center;
-      border: 1px solid #666;
-    }
-    #help .desc {
-      padding: 5px 0;
-      font-size: 13px;
-    }
-    #help button {
-      width: 100%;
-      margin-top: 20px;
-      padding: 12px;
-      font-size: 14px;
-    }
-    /* Button System */
-    button, .btn {
-      padding: 10px 20px;
-      border: 1px solid var(--color-border-light);
-      border-radius: var(--border-radius-sm);
-      background: var(--color-bg-button);
-      color: var(--color-text-primary);
-      font-family: var(--font-family);
-      font-size: var(--font-size-sm);
-      font-weight: var(--font-weight-medium);
-      cursor: pointer;
-      transition: all 0.2s ease;
-      outline: none;
-    }
-    button:hover, .btn:hover {
-      background: rgba(26, 26, 46, 0.9);
-      border-color: var(--color-accent);
-      transform: translateY(-1px);
-      box-shadow: var(--shadow-button);
-    }
-    button:active, .btn:active {
-      transform: translateY(0);
-    }
-    .btn-primary {
-      background: var(--color-accent);
-      border-color: var(--color-accent);
-      color: #000;
-      font-weight: var(--font-weight-medium);
-    }
-    .btn-primary:hover {
-      background: var(--color-accent-hover);
-      border-color: var(--color-accent-hover);
-    }
-    .btn-danger {
-      background: var(--color-danger);
-      border-color: var(--color-danger);
-      color: #fff;
-    }
-    .btn-danger:hover {
-      background: #ff6666;
-      border-color: #ff6666;
-    }
-    .btn-block {
-      width: 100%;
-      display: block;
-    }
-    #help-btn {
-      position: absolute;
-      bottom: 20px;
-      right: 20px;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: var(--color-bg-button);
-      border: 1px solid var(--color-accent);
-      color: var(--color-accent);
-      font-size: 20px;
-      cursor: pointer;
-      z-index: 100;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s ease;
-    }
-    #help-btn:hover {
-      background: rgba(26, 26, 46, 0.9);
-      border-color: var(--color-accent-hover);
-      color: var(--color-accent-hover);
-      transform: translateY(-2px);
-      box-shadow: var(--shadow-button);
-    }
-    /* Bottom controls suggestions — hides after first use */
-    #controls-suggestions {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 90;
-      padding: 10px 20px;
-      background: var(--color-bg-panel);
-      border: 1px solid var(--color-border-light);
-      border-radius: 24px;
-      color: var(--color-text-secondary);
-      font-size: var(--font-size-sm);
-      white-space: nowrap;
-      backdrop-filter: blur(12px);
-      box-shadow: var(--shadow-panel);
-      transition: opacity 0.35s ease, transform 0.35s ease;
-      pointer-events: none;
-    }
-    #controls-suggestions.hidden {
-      opacity: 0;
-      transform: translateX(-50%) translateY(12px);
-      pointer-events: none;
-    }
-    #admin-sidebar {
-      position: fixed;
-      top: 0;
-      left: -400px; /* Hidden off-screen (width + shadow) */
-      width: 350px;
-      height: 100vh;
-      background: var(--color-bg-panel);
-      border-right: 2px solid var(--color-accent);
-      border-top-right-radius: var(--border-radius-lg);
-      border-bottom-right-radius: var(--border-radius-lg);
-      color: var(--color-text-primary);
-      z-index: 150;
-      padding: var(--spacing-lg);
-      overflow-y: auto;
-      transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: var(--shadow-panel);
-    }
-    #admin-sidebar.visible {
-      left: 0;
-    }
-    /* Close button inside sidebar */
-    #admin-sidebar .close {
-      position: absolute;
-      top: var(--spacing-lg);
-      right: var(--spacing-lg);
-      font-size: 24px;
-      color: var(--color-text-secondary);
-      cursor: pointer;
-      background: none;
-      border: none;
-      padding: var(--spacing-xs);
-      transition: color 0.2s ease;
-      z-index: 1;
-    }
-    #admin-sidebar .close:hover {
-      color: var(--color-accent);
-    }
-    #admin-sidebar h2, #admin-sidebar h3 {
-      color: var(--color-accent);
-      font-weight: var(--font-weight-bold);
-    }
-    #admin-toggle {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: rgba(0, 0, 0, 0.7);
-      border: 1px solid #0a0;
-      color: #0a0;
-      font-size: 20px;
-      cursor: pointer;
-      z-index: 100;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    #admin-toggle:hover {
-      background: rgba(0, 10, 0, 0.9);
-    }
-    .job-item {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid #333;
-      border-radius: 5px;
-      padding: 10px;
-      margin: 10px 0;
-    }
-    .progress-bar {
-      width: 100%;
-      height: 20px;
-      background: #222;
-      border-radius: 10px;
-      overflow: hidden;
-      margin: 5px 0;
-    }
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #0a0, #0f0);
-      transition: width 0.3s ease;
-    }
-    .job-status {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 3px;
-      font-size: 11px;
-      margin-left: 5px;
-    }
-    .job-status.running { background: #0a0; color: #000; }
-    .job-status.completed { background: #666; color: #fff; }
-    .job-status.error { background: #a00; color: #fff; }
-
-    /* ——— Mobile & small screens ——— */
-    @media (max-width: 768px) {
-      #search {
-        top: calc(12px + env(safe-area-inset-top, 0px));
-        left: 12px;
-        right: 12px;
-        width: auto;
-        max-width: none;
-        transform: none;
-      }
-      #search input {
-        padding: 14px 20px;
-        font-size: 16px; /* prevents iOS zoom on focus */
-      }
-      #clear-connections-btn {
-        top: auto;
-        bottom: calc(42vh + 28px + env(safe-area-inset-bottom, 0px));
-        left: 12px;
-        right: 12px;
-        transform: none;
-        width: auto;
-        padding: 10px 16px;
-        font-size: var(--font-size-sm);
-      }
-      /* Mobile: detail as bottom sheet — 1/3 screen by default, scroll up for full */
-      #detail {
-        top: auto;
-        right: 0;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        max-width: 100vw;
-        height: 33.33vh;
-        max-height: 33.33vh;
-        border-left: none;
-        border-top: 2px solid var(--color-accent);
-        border-top-left-radius: var(--border-radius-lg);
-        border-top-right-radius: var(--border-radius-lg);
-        border-bottom-left-radius: 0;
-        border-bottom-right-radius: 0;
-        padding: 12px 20px 20px;
-        padding-top: 8px;
-        padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-        padding-left: calc(20px + env(safe-area-inset-left, 0px));
-        padding-right: calc(20px + env(safe-area-inset-right, 0px));
-        transform: translateY(100%);
-        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                    height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                    max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        touch-action: pan-y;
-      }
-      #detail.visible {
-        transform: translateY(0);
-      }
-      /* Expanded: full height so user can scroll content; scroll down to collapse */
-      #detail.visible.detail-expanded {
-        height: 92vh;
-        max-height: 92vh;
-      }
-      /* Drag handle — visible only on mobile (same breakpoint as #detail bottom sheet) */
-      .detail-drag-handle {
-        display: block;
-        width: 40px;
-        height: 4px;
-        margin: 0 auto 12px;
-        background: rgba(255, 255, 255, 0.35);
-        border-radius: 2px;
-        flex-shrink: 0;
-        cursor: grab;
-        touch-action: none;
-      }
-      .detail-drag-handle:active {
-        cursor: grabbing;
-      }
-      #admin-sidebar {
-        width: 100%;
-        left: -100%;
-        max-width: 100vw;
-        padding: 20px;
-        padding-top: calc(20px + env(safe-area-inset-top, 0px));
-        padding-left: calc(20px + env(safe-area-inset-left, 0px));
-        padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-      }
-      #admin-sidebar.visible {
-        left: 0;
-      }
-      #help {
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        max-width: none;
-        width: 100%;
-        height: 100%;
-        transform: none;
-        border-radius: 0;
-        padding: 24px;
-        padding-top: calc(24px + env(safe-area-inset-top, 0px));
-        padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-      }
-      #help .shortcuts {
-        gap: 12px 16px;
-      }
-      #help .key, #help .desc {
-        padding: 8px 0;
-        min-height: 44px;
-        display: flex;
-        align-items: center;
-      }
-      #help .key {
-        padding: 8px 12px;
-      }
-      #help-btn {
-        bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-        right: calc(20px + env(safe-area-inset-right, 0px));
-        width: 48px;
-        height: 48px;
-        font-size: 22px;
-      }
-      #admin-toggle {
-        top: calc(12px + env(safe-area-inset-top, 0px));
-        left: calc(12px + env(safe-area-inset-left, 0px));
-        width: 48px;
-        height: 48px;
-        font-size: 22px;
-      }
-      #controls-suggestions {
-        left: 12px;
-        right: 12px;
-        bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-        transform: none;
-        width: auto;
-        max-width: none;
-        white-space: normal;
-        text-align: center;
-        padding: 12px 16px;
-        font-size: var(--font-size-xs);
-      }
-      #controls-suggestions.hidden {
-        transform: translateY(12px);
-      }
-      .detail-avatar {
-        width: 96px;
-        height: 96px;
-        font-size: 36px;
-      }
-      .posts-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 6px;
-      }
-      .post-expanded-back {
-        top: calc(12px + env(safe-area-inset-top, 0px));
-        left: calc(12px + env(safe-area-inset-left, 0px));
-        width: 44px;
-        height: 44px;
-        font-size: 22px;
-      }
-      .post-expanded-image {
-        max-height: 50vh;
-      }
-      .search-result-item {
-        padding: 14px 16px;
-        min-height: 48px;
-      }
-      .supporter-card {
-        width: 90px;
-        height: 126px;
-      }
-    }
-
-    @media (max-width: 480px) {
-      #controls-suggestions {
-        bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-      }
-      #clear-connections-btn {
-        bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-        left: 8px;
-        right: 8px;
-      }
-      #detail h3 {
-        font-size: var(--font-size-lg);
-      }
-      #detail p, #detail .detail-header-id {
-        font-size: var(--font-size-sm);
-      }
-      .posts-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 4px;
-      }
-      .post-item .post-text {
-        font-size: 10px;
-        -webkit-line-clamp: 4;
-      }
-    }
-  </style>
-</head>
-<body>
-  <button id="admin-toggle" onclick="toggleAdmin()" title="Admin Dashboard (A)">☰</button>
-
-  <div id="search">
-    <input type="text" placeholder="Search by username..." onkeyup="searchMember(event)" onfocus="showSearchDropdown()" />
-    <div id="search-dropdown">
-      <!-- Search results will be populated here -->
-    </div>
-  </div>
-
-  <button id="clear-connections-btn" onclick="clearConnectionLines()" title="Clear all connection lines" style="display: none;">✕ Clear connections</button>
-
-  <!-- Floating username label, positioned via JS each frame -->
-  <div id="star-label">
-    <div class="star-label-name">
-      <span class="star-label-pip" id="star-label-pip"></span>
-      <span id="star-label-text"></span>
-    </div>
-  </div>
-
-  <div id="detail">
-    <div id="detail-drag-handle" class="detail-drag-handle" aria-hidden="true"></div>
-    <span class="close" onclick="closeDetail()">✕</span>
-    <div class="detail-header">
-      <div class="detail-avatar" id="detail-avatar">
-        <!-- Profile picture or initials will be here -->
-      </div>
-      <div class="detail-header-info">
-        <h3 id="detail-username">-</h3>
-        <div class="detail-header-id"><strong>ID:</strong> <span id="detail-id">-</span></div>
-      </div>
-    </div>
-
-    <button class="btn btn-primary btn-block" onclick="focusOnSelected()" style="margin-top: 10px;">Zoom to Member</button>
-
-    <!-- Beams & Planets stats (counts animate as data loads) -->
-    <div id="detail-stats" class="detail-stats">
-      <div class="detail-stat-card beams">
-        <span class="detail-stat-icon" aria-hidden="true">✨</span>
-        <span id="detail-beams-count" class="detail-stat-value">0</span>
-        <span class="detail-stat-label">Beams</span>
-        <span class="detail-stat-desc">Times they supported others</span>
-      </div>
-      <div class="detail-stat-card planets">
-        <span class="detail-stat-icon" aria-hidden="true">🪐</span>
-        <span id="detail-planets-count" class="detail-stat-value">0</span>
-        <span class="detail-stat-label">Planets</span>
-        <span class="detail-stat-desc">Stories they shared</span>
-      </div>
-    </div>
-
-    <!-- Top 3 supported users — portrait playing card deck -->
-    <div id="supporters-section" style="display:none; margin: 20px 0 0 0;">
-      <h4 style="margin: 0 0 16px 0; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.08em;">Top Supported</h4>
-      <div id="supporter-cards-container" style="position:relative; height: 160px;"></div>
-    </div>
-
-    <div class="posts-section">
-      <h4>Posts</h4>
-      <div id="posts-grid" class="posts-grid">
-        <div class="posts-loading">Loading posts...</div>
-      </div>
-    </div>
-
-    <!-- Expanded Post View -->
-    <div id="post-expanded">
-      <button class="post-expanded-back" onclick="closeExpandedPost()">←</button>
-      <div class="post-expanded-content">
-        <img id="post-expanded-image" class="post-expanded-image" crossorigin="anonymous" style="display: none;" />
-        <div id="post-expanded-text" class="post-expanded-text"></div>
-        <div id="post-expanded-meta" class="post-expanded-meta"></div>
-      </div>
-      <div class="post-comments-section">
-        <h4 class="post-comments-header">Comments <span id="comment-count"></span></h4>
-        <div id="post-comments-list">
-          <div class="comments-loading">Loading comments...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="admin-sidebar">
-    <span class="close" onclick="toggleAdmin()">✕</span>
-    <h2 style="margin-top: 0;">Admin Dashboard</h2>
-    <div style="border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px;">
-      <p style="margin: 5px 0;"><strong>Total Members:</strong> <span id="admin-total">0</span></p>
-      <p style="margin: 5px 0;"><strong>Real Data Loaded:</strong> <span id="admin-real">0</span></p>
-      <p style="margin: 5px 0;"><strong>Synthetic Data:</strong> <span id="admin-synthetic">100,000</span></p>
-    </div>
-
-    <h3 style="margin-top: 20px;">Performance</h3>
-    <div style="border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px;">
-      <p style="margin: 5px 0;"><strong>FPS:</strong> <span id="fps">0</span></p>
-      <p style="margin: 5px 0;"><strong>Points:</strong> <span id="count">0</span></p>
-      <p style="margin: 5px 0;"><strong>Memory:</strong> <span id="memory">0 MB</span></p>
-      <p style="margin: 5px 0;"><strong>Draw Calls:</strong> <span id="draws">0</span></p>
-      <p style="margin: 5px 0;"><strong>Geometry:</strong> <span id="geom">0 MB</span></p>
-    </div>
-
-    <h3 style="margin-top: 20px;">Background Jobs</h3>
-    <div id="jobs-container">
-      <!-- Jobs will be added here dynamically -->
-    </div>
-
-    <button class="btn btn-primary btn-block" onclick="startLoadRealDataJob()" style="margin-top: 20px;">Continue Loading Data</button>
-    <button class="btn btn-danger btn-block" onclick="resetJobState()" style="margin-top: 10px;">Reset Job State</button>
-    <button class="btn btn-block" onclick="clearSnapshot()" style="margin-top: 10px;">Clear Snapshot Cache</button>
-    <button class="btn btn-block" onclick="clearAllJobs()" style="margin-top: 10px;">Clear Job History</button>
-    <p id="snapshot-status" style="font-size: 11px; color: #888; margin-top: 8px; text-align: center;"></p>
-  </div>
-
-  <div id="help">
-    <h2>Manifest Point Cloud — Controls</h2>
-
-    <div class="shortcuts">
-      <div class="key">Drag</div>
-      <div class="desc">Rotate camera around universe</div>
-
-      <div class="key">Scroll</div>
-      <div class="desc">Zoom in/out</div>
-
-      <div class="key">Click</div>
-      <div class="desc">Select member (show details)</div>
-
-      <div class="key">R</div>
-      <div class="desc">Toggle auto-rotation</div>
-
-      <div class="key">H</div>
-      <div class="desc">Reset camera to home position</div>
-
-      <div class="key">F</div>
-      <div class="desc">Focus on random cluster</div>
-
-      <div class="key">A</div>
-      <div class="desc">Toggle admin dashboard</div>
-
-      <div class="key">/</div>
-      <div class="desc">Focus search box</div>
-
-      <div class="key">ESC</div>
-      <div class="desc">Close panels</div>
-
-      <div class="key">?</div>
-      <div class="desc">Toggle this help screen</div>
-    </div>
-
-    <button onclick="toggleHelp()">Got it!</button>
-  </div>
-
-  <div id="controls-suggestions">Drag to rotate · Scroll to zoom · Click points for details</div>
-
-  <button id="help-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
-
-  <div id="loading-screen" aria-live="polite" aria-busy="true">
-    <div class="loading-content">
-      <span class="loading-title">Manifest</span>
-      <span class="loading-tagline">You're Never Alone</span>
-    </div>
-  </div>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.182.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.182.0/examples/jsm/"
-      }
-    }
-  </script>
-
-  <script type="module">
     import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
     let scene, camera, renderer, points, controls;
     let rotating = false; // Start paused for better UX
@@ -1430,7 +29,8 @@
       };
     }
 
-    function init() {
+    export function init(containerElement) {
+      _sceneDisposed = false;
       // Scene
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x0a0a1a);
@@ -1441,26 +41,32 @@
       camera.position.set(120, 0, 80);
       camera.lookAt(0, 0, 0);
 
-      // Renderer
-      renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
+      // Renderer — mount in container when provided (React) else body (standalone HTML)
+      const isMobileView = window.innerWidth <= 768;
+      const maxPR = isMobileView ? 1.5 : 2;
+      renderer = new THREE.WebGLRenderer({
+        antialias: false,
+        alpha: false,
+        powerPreference: 'high-performance',
+      });
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      document.body.appendChild(renderer.domElement);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPR));
+      (containerElement || document.body).appendChild(renderer.domElement);
 
       // OrbitControls for smooth navigation
       controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
-      controls.dampingFactor = 0.05;
+      controls.dampingFactor = 0.08;
       controls.minDistance = 0.1;  // Allow EXTREME close zoom for star detail (was 0.5)
       controls.maxDistance = 1000;  // Allow much farther zoom (was 800)
       controls.autoRotate = false;
       controls.autoRotateSpeed = 0.5;
 
-      // Mouse/touch interaction
+      // Mouse/touch interaction (passive touchstart = no scroll blocking, better responsiveness)
       renderer.domElement.addEventListener('mousemove', onMouseMove);
       renderer.domElement.addEventListener('mousedown', onMouseDown);
       renderer.domElement.addEventListener('click', onMouseClick);
-      renderer.domElement.addEventListener('touchstart', onTouchStart);
+      renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
 
       // Animation loop
       animate();
@@ -1469,7 +75,7 @@
       // generatePoints(1000); // REMOVED: Only show real users from Back4App
 
       // Auto-start loading real data in background
-      setTimeout(() => {
+      const dataLoadTimeoutId = setTimeout(() => {
         startLoadRealDataJob();
       }, 500);
 
@@ -1500,7 +106,7 @@
       }
       if (!sessionStorage.getItem('controlsSuggestionsDismissed')) {
         controls.addEventListener('start', dismissControlsSuggestions);
-        renderer.domElement.addEventListener('wheel', dismissControlsSuggestions, { once: true });
+        renderer.domElement.addEventListener('wheel', dismissControlsSuggestions, { once: true, passive: true });
         renderer.domElement.addEventListener('click', dismissControlsSuggestions, { once: true });
       } else {
         const el = document.getElementById('controls-suggestions');
@@ -1509,6 +115,94 @@
       // Navigation state: pause beam animation and hide planets while rotating/panning
       controls.addEventListener('start', () => { _isNavigating = true; });
       controls.addEventListener('end', () => { _isNavigating = false; });
+
+      // Delegated click on search dropdown so selecting a result works (inline onclick can fail in React)
+      function onSearchDropdownClick(e) {
+        const item = e.target.closest('.search-result-item');
+        if (!item) return;
+        const idxStr = item.getAttribute('data-index');
+        if (idxStr == null) return;
+        const idx = parseInt(idxStr, 10);
+        if (!isNaN(idx) && typeof window.selectSearchResultByIndex === 'function') {
+          e.preventDefault();
+          window.selectSearchResultByIndex(idx);
+        }
+      }
+      const searchDropdownEl = document.getElementById('search-dropdown');
+      if (searchDropdownEl) searchDropdownEl.addEventListener('click', onSearchDropdownClick);
+
+      // Delegated click on supporter cards (detail panel) so cards are clickable when DOM is driven by React
+      function onSupporterCardClick(e) {
+        const container = document.getElementById('supporter-cards-container');
+        if (!container || !container.contains(e.target)) return;
+        const card = e.target.closest('.supporter-card');
+        if (!card) return;
+        const id = card.getAttribute('data-member-id');
+        if (!id) return;
+        const idx = memberIndexMap.get(id);
+        if (idx !== undefined) {
+          e.preventDefault();
+          flashPoint(idx);
+        }
+      }
+      document.addEventListener('click', onSupporterCardClick);
+
+      function onLoadMorePostsClick(e) {
+        const btn = e.target.closest('.posts-load-more-btn');
+        if (!btn) return;
+        e.preventDefault();
+        const postsGrid = document.getElementById('posts-grid');
+        if (!postsGrid || !_currentPostsForGrid || _currentPostsUserId == null) return;
+        const from = _postsGridShownCount;
+        const to = Math.min(from + POST_GRID_LOAD_MORE, _currentPostsForGrid.length);
+        const chunk = _currentPostsForGrid.slice(from, to);
+        const wrap = postsGrid.querySelector('.posts-load-more-wrap');
+        const fragment = document.createDocumentFragment();
+        chunk.forEach((p) => {
+          const div = document.createElement('div');
+          div.innerHTML = buildPostItemHTML(p, _currentPostsUserId);
+          fragment.appendChild(div.firstElementChild);
+        });
+        postsGrid.insertBefore(fragment, wrap);
+        _postsGridShownCount = to;
+        if (_postsGridShownCount >= _currentPostsForGrid.length && wrap) wrap.remove();
+      }
+      document.addEventListener('click', onLoadMorePostsClick);
+
+      // Return cleanup for React unmount (e.g. Strict Mode remount or route change)
+      return function cleanup() {
+        _sceneDisposed = true;
+        if (_animateRafId != null) {
+          cancelAnimationFrame(_animateRafId);
+          _animateRafId = null;
+        }
+        if (_mouseMoveRaf != null) {
+          cancelAnimationFrame(_mouseMoveRaf);
+          _mouseMoveRaf = null;
+        }
+        clearTimeout(dataLoadTimeoutId);
+        window.removeEventListener('resize', onResize);
+        window.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('popstate', applyUserFromUrl);
+        const searchDrop = document.getElementById('search-dropdown');
+        if (searchDrop && onSearchDropdownClick) searchDrop.removeEventListener('click', onSearchDropdownClick);
+        document.removeEventListener('click', onSupporterCardClick);
+        document.removeEventListener('click', onLoadMorePostsClick);
+        if (controls) {
+          controls.dispose();
+        }
+        if (renderer && renderer.domElement && containerElement && containerElement.contains(renderer.domElement)) {
+          containerElement.removeChild(renderer.domElement);
+        }
+        if (renderer) {
+          renderer.dispose();
+        }
+        scene = null;
+        camera = null;
+        renderer = null;
+        points = null;
+        controls = null;
+      };
     }
 
     // Store point metadata for interaction
@@ -1551,6 +245,8 @@
     let _detailBeamsCurrent = 0;
     let _detailPlanetsCurrent = 0;
     const DETAIL_COUNTER_DURATION_MS = 600;
+    const DETAIL_COUNTER_THROTTLE_MS = 400;
+    let _lastDetailBeamsCountUpdate = 0;
 
     function animateDetailCounter(elementId, targetValue) {
       const el = document.getElementById(elementId);
@@ -1664,35 +360,26 @@
       void main() {
         vec2 coord = gl_PointCoord * 2.0 - 1.0;
         float dist = length(coord);
+        if (dist > 0.85) discard;
 
         float core      = 1.0 - smoothstep(0.0,  0.2,  dist);
         float innerGlow = 1.0 - smoothstep(0.2,  0.5,  dist);
         float outerGlow = 1.0 - smoothstep(0.5,  0.85, dist);
 
-        // Distance brightness boost: stars 3× brighter when viewed from afar
-        // distBoost goes 0→1 as camDist 30→250, then stays 1 beyond 250
         float distBoost = smoothstep(30.0, 250.0, vCamDist);
         float brightMult = mix(1.0, 3.0, distBoost);
-
         float brightness = (core * 1.8 + innerGlow * 0.5 + outerGlow * 0.35) * brightMult;
         float alpha      = (core * 1.0 + innerGlow * 0.8 + outerGlow * 0.4)  * brightMult;
 
-        if (dist > 0.85) discard;
-
-        // Mild fog only — reduced so distant stars stay vivid
         float depth = gl_FragCoord.z / gl_FragCoord.w;
-        float fogFactor = smoothstep(80.0, 400.0, depth);
-        alpha *= (1.0 - fogFactor * 0.35);
+        alpha *= (1.0 - smoothstep(80.0, 400.0, depth) * 0.35);
 
         vec3 finalColor = vColor * brightness;
-
         if (vIsSelected > 0.5) {
-          float pulseGlow = sin(time * 3.0) * 0.3 + 0.7;
-          float selectionGlow = 1.0 - smoothstep(0.0, 1.0, dist);
-          alpha = mix(alpha, alpha + selectionGlow * 0.5, pulseGlow);
-          finalColor *= 1.3;
+          float selGlow = 1.0 - smoothstep(0.0, 1.0, dist);
+          alpha += selGlow * 0.4;
+          finalColor *= 1.25;
         }
-
         gl_FragColor = vec4(finalColor, clamp(alpha, 0.0, 1.0));
       }
     `;
@@ -1819,28 +506,34 @@
       console.timeEnd(`generate-${count}`);
     }
 
+    let _mouseMoveRaf = null;
     function onMouseMove(event) {
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-      // Show pointer cursor when hovering over a beam
+      // Throttle beam hover check to next frame (avoid raycaster on every mousemove for FPS)
       if (activeConnectionLine && renderer) {
-        raycaster.setFromCamera(mouse, camera);
-        const prevT = raycaster.params.Line.threshold;
-        raycaster.params.Line.threshold = 1.2;
-        let hits = [];
-        const batches = activeConnectionLine.batches;
-        if (batches) {
-          for (let i = 0; i < batches.length; i++) {
-            if (batches[i].lineSegments) {
-              hits = hits.concat(raycaster.intersectObject(batches[i].lineSegments));
+        if (_mouseMoveRaf != null) return;
+        _mouseMoveRaf = requestAnimationFrame(() => {
+          _mouseMoveRaf = null;
+          if (!activeConnectionLine || !renderer) return;
+          raycaster.setFromCamera(mouse, camera);
+          const prevT = raycaster.params.Line.threshold;
+          raycaster.params.Line.threshold = 1.2;
+          let hits = [];
+          const batches = activeConnectionLine.batches;
+          if (batches) {
+            for (let i = 0; i < batches.length; i++) {
+              if (batches[i].lineSegments) {
+                hits = hits.concat(raycaster.intersectObject(batches[i].lineSegments));
+              }
             }
+          } else if (activeConnectionLine.lineSegments) {
+            hits = raycaster.intersectObject(activeConnectionLine.lineSegments);
           }
-        } else if (activeConnectionLine.lineSegments) {
-          hits = raycaster.intersectObject(activeConnectionLine.lineSegments);
-        }
-        raycaster.params.Line.threshold = prevT;
-        renderer.domElement.style.cursor = hits.length > 0 ? 'pointer' : '';
+          raycaster.params.Line.threshold = prevT;
+          renderer.domElement.style.cursor = hits.length > 0 ? 'pointer' : '';
+        });
       }
     }
 
@@ -2079,11 +772,10 @@
 
     /** URL is path-based: / for root, /username for a user. No hash or test-point-cloud in path. */
     function getSlugFromUrl() {
-      const path = (location.pathname.replace(/^\//, '').split('/')[0] || '').trim();
+      const path = location.pathname.replace(/^\//, '').split('/')[0] || '';
       if (!path || path === 'test-point-cloud.html' || path === 'index.html') return null;
       try {
-        const decoded = (decodeURIComponent(path) || '').trim();
-        return decoded || null;
+        return decodeURIComponent(path) || null;
       } catch (_) {
         return path || null;
       }
@@ -2092,18 +784,10 @@
     /** Resolve URL slug (id or username, case-insensitive) to member index, or undefined. */
     function getMemberIndexFromSlug(slug) {
       if (!slug) return undefined;
-      const raw = (typeof slug === 'string' ? slug : String(slug)).trim();
-      if (!raw) return undefined;
-      let normalized;
-      try {
-        normalized = decodeURIComponent(raw).trim() || raw;
-      } catch (_) {
-        normalized = raw;
-      }
-      if (!normalized) return undefined;
-      const byId = memberIndexMap.get(normalized);
+      const decoded = decodeURIComponent(slug).trim();
+      const byId = memberIndexMap.get(decoded);
       if (byId !== undefined) return byId;
-      const byUsername = usernameToIndexMap.get(normalized.toLowerCase());
+      const byUsername = usernameToIndexMap.get(decoded.toLowerCase());
       return byUsername;
     }
 
@@ -2119,24 +803,16 @@
       }
     }
 
-    /** True if str can be used in URL path without percent-encoding (no spaces, emojis, etc.). */
-    function isUrlSafeSlug(str) {
-      if (!str || typeof str !== 'string') return false;
-      const s = String(str).trim();
-      return s.length > 0 && encodeURIComponent(s) === s;
-    }
-
     function setUrlForUser(userId, username) {
       const root = '/';
       if (!userId) {
         history.replaceState(null, '', root + location.search);
         return;
       }
-      let slug = userId;
-      const name = username && username !== 'Anonymous' && !/^User\d+$/i.test(String(username))
-        ? String(username).trim()
-        : '';
-      if (name && isUrlSafeSlug(name)) slug = name;
+      const raw = (username && username !== 'Anonymous' && !/^User\d+$/i.test(String(username)))
+        ? username
+        : userId;
+      const slug = String(raw).trim();
       history.replaceState(null, '', root + encodeURIComponent(slug) + location.search);
     }
 
@@ -2208,7 +884,6 @@
       if (beamsEl) beamsEl.textContent = '0';
       if (planetsEl) planetsEl.textContent = '0';
 
-      // Blur the sidebar when transitioning between users (already visible)
       const detailEl = document.getElementById('detail');
       const alreadyOpen = detailEl && detailEl.classList.contains('visible');
       if (alreadyOpen && detailEl) {
@@ -2432,118 +1107,106 @@
         : (metadata.sobrietyDate || metadata.sobriety ? '< 1 day' : 'Not set'));
 
       if (detailEl) detailEl.classList.add('visible');
-      // Mobile bottom sheet: start at 1/3 height so user can scroll up for full details
       if (detailEl && window.innerWidth <= 768) {
         detailEl.classList.remove('detail-expanded');
       }
 
-      // Update URL so this user can be revisited via the same link (prefer username in URL)
       setUrlForUser(metadata.id, metadata.username);
 
-      // Remove blur after content is swapped — triggers fade-back-in transition
+      // Unblur quickly (single rAF) so panel is interactive sooner
       if (alreadyOpen && detailEl) {
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (detailEl) detailEl.classList.remove('content-transitioning');
-          });
+          if (detailEl) detailEl.classList.remove('content-transitioning');
         });
       }
 
-      // Prioritize profile picture: delay posts so profile pic request wins the connection pool
+      // Defer heavy work so panel paint and next click can run first
       const PROFILE_PRIORITY_DELAY_MS = 400;
-      setTimeout(() => loadUserPosts(metadata.id), PROFILE_PRIORITY_DELAY_MS);
-
-      // Beams are drawn after zoom/travel finishes (see animateZoom callbacks below)
-
-      // Zoom close to the selected star
-      if (!points || !points.geometry || !points.geometry.attributes.position) {
-        console.error('Points geometry not initialized');
-        return;
-      }
-
-      const positions = points.geometry.attributes.position.array;
-      if (index * 3 + 2 >= positions.length) {
-        console.error(`Invalid index ${index} for positions array of length ${positions.length}`);
-        return;
-      }
-
-      const targetPos = new THREE.Vector3(
-        positions[index * 3],
-        positions[index * 3 + 1],
-        positions[index * 3 + 2]
-      );
-
-      // Skip zoom only when re-selecting the same star we're already viewing
-      const distToTarget = camera.position.distanceTo(targetPos);
-      if (prevIndex === index && distToTarget <= 12) {
-        drawConnectionLines(metadata.id); // still load/refresh beams when re-selecting same star
-        return;
-      }
-
-      // Position camera in front of the member (on the ray from center through member), zoomed in; orbit target = member so drag rotates around them
-      const center = new THREE.Vector3(0, 0, 0);
-      const distToCenter = targetPos.length();
-      const CAMERA_DISTANCE_FROM_MEMBER = 10 / 3;
-      let endPos, endTarget;
-      if (distToCenter < 0.01) {
-        endPos = targetPos.clone().add(new THREE.Vector3(1, 1, 5 / 3));
-        endTarget = targetPos.clone();
-      } else {
-        const dirFromCenter = targetPos.clone().normalize();
-        endPos = targetPos.clone().add(dirFromCenter.multiplyScalar(CAMERA_DISTANCE_FROM_MEMBER));
-        endTarget = targetPos.clone();
-      }
-
-      const fromGodView = options && options.fromGodView;
-      const startPos = fromGodView
-        ? new THREE.Vector3(GOD_VIEW_POSITION.x, GOD_VIEW_POSITION.y, GOD_VIEW_POSITION.z)
-        : camera.position.clone();
-      const startTarget = fromGodView
-        ? new THREE.Vector3(GOD_VIEW_TARGET.x, GOD_VIEW_TARGET.y, GOD_VIEW_TARGET.z)
-        : controls.target.clone();
-
-      if (fromGodView) {
-        camera.position.copy(startPos);
-        controls.target.copy(startTarget);
-        controls.update();
-      }
-
       const userIdForBeams = metadata.id;
-      _isTraveling = true;
-      if (fromGodView) {
-        const startTime = performance.now();
-        const animateZoom = () => {
-          const elapsed = performance.now() - startTime;
-          const tLinear = Math.min(1, elapsed / FLY_TO_USER_DURATION_MS);
-          const t = 1 - Math.pow(1 - tLinear, 3);
-          camera.position.lerpVectors(startPos, endPos, t);
-          controls.target.lerpVectors(startTarget, endTarget, t);
+      setTimeout(() => {
+        loadUserPosts(metadata.id);
+      }, PROFILE_PRIORITY_DELAY_MS);
+
+      // Defer zoom and beams to next tick so panel paints and stays responsive to clicks
+      setTimeout(() => {
+        if (!points || !points.geometry || !points.geometry.attributes.position) return;
+        const positions = points.geometry.attributes.position.array;
+        if (selectedMemberIndex !== index || index * 3 + 2 >= positions.length) return;
+
+        const targetPos = new THREE.Vector3(
+          positions[index * 3],
+          positions[index * 3 + 1],
+          positions[index * 3 + 2]
+        );
+
+        const distToTarget = camera.position.distanceTo(targetPos);
+        if (prevIndex === index && distToTarget <= 12) {
+          drawConnectionLines(metadata.id);
+          return;
+        }
+
+        const distToCenter = targetPos.length();
+        const CAMERA_DISTANCE_FROM_MEMBER = 10 / 3;
+        let endPos, endTarget;
+        if (distToCenter < 0.01) {
+          endPos = targetPos.clone().add(new THREE.Vector3(1, 1, 5 / 3));
+          endTarget = targetPos.clone();
+        } else {
+          const dirFromCenter = targetPos.clone().normalize();
+          endPos = targetPos.clone().add(dirFromCenter.multiplyScalar(CAMERA_DISTANCE_FROM_MEMBER));
+          endTarget = targetPos.clone();
+        }
+
+        const fromGodView = options && options.fromGodView;
+        const startPos = fromGodView
+          ? new THREE.Vector3(GOD_VIEW_POSITION.x, GOD_VIEW_POSITION.y, GOD_VIEW_POSITION.z)
+          : camera.position.clone();
+        const startTarget = fromGodView
+          ? new THREE.Vector3(GOD_VIEW_TARGET.x, GOD_VIEW_TARGET.y, GOD_VIEW_TARGET.z)
+          : controls.target.clone();
+
+        if (fromGodView) {
+          camera.position.copy(startPos);
+          controls.target.copy(startTarget);
           controls.update();
-          if (t >= 1) {
-            _isTraveling = false;
-            drawConnectionLines(userIdForBeams);
-            return;
-          }
-          requestAnimationFrame(animateZoom);
-        };
-        animateZoom();
-      } else {
-        let t = 0;
-        const animateZoom = () => {
-          t += 0.03;
-          if (t > 1) t = 1;
-          camera.position.lerpVectors(startPos, endPos, t);
-          controls.target.lerpVectors(startTarget, endTarget, t);
-          controls.update();
-          if (t >= 1) {
-            _isTraveling = false;
-            drawConnectionLines(userIdForBeams);
-            return;
-          }
-          requestAnimationFrame(animateZoom);
-        };
-        animateZoom();
-      }
+        }
+
+        _isTraveling = true;
+        if (fromGodView) {
+          const startTime = performance.now();
+          const animateZoom = () => {
+            const elapsed = performance.now() - startTime;
+            const tLinear = Math.min(1, elapsed / FLY_TO_USER_DURATION_MS);
+            const t = 1 - Math.pow(1 - tLinear, 3);
+            camera.position.lerpVectors(startPos, endPos, t);
+            controls.target.lerpVectors(startTarget, endTarget, t);
+            controls.update();
+            if (t >= 1) {
+              _isTraveling = false;
+              drawConnectionLines(metadata.id);
+              return;
+            }
+            requestAnimationFrame(animateZoom);
+          };
+          animateZoom();
+        } else {
+          let t = 0;
+          const animateZoom = () => {
+            t += 0.03;
+            if (t > 1) t = 1;
+            camera.position.lerpVectors(startPos, endPos, t);
+            controls.target.lerpVectors(startTarget, endTarget, t);
+            controls.update();
+            if (t >= 1) {
+              _isTraveling = false;
+              drawConnectionLines(metadata.id);
+              return;
+            }
+            requestAnimationFrame(animateZoom);
+          };
+          animateZoom();
+        }
+      }, 0);
     }
 
     function generateRiskExplanation(metadata) {
@@ -2630,12 +1293,12 @@
         if (!isMobile() || !detailEl.classList.contains('visible')) return;
         const dy = e.clientY - dragStartY;
         if (dragStartExpanded) {
-          if (dy > 30 && !dragDidCollapse) {
+          if (dy > 25 && !dragDidCollapse) {
             detailEl.classList.remove('detail-expanded');
             dragDidCollapse = true;
           }
         } else {
-          if (dy < -25 && !dragDidExpand) {
+          if (dy < -20 && !dragDidExpand) {
             detailEl.classList.add('detail-expanded');
             dragDidExpand = true;
           } else if (dy > 80 && !dragDidClose) {
@@ -2655,7 +1318,8 @@
         } else {
           delete detailEl.dataset.atTop;
         }
-        if (!detailEl.classList.contains('detail-expanded') && detailEl.scrollTop > 60) {
+        // Scroll up (content scrolling up) → expand to full screen
+        if (!detailEl.classList.contains('detail-expanded') && detailEl.scrollTop > 40) {
           detailEl.classList.add('detail-expanded');
         }
       }, { passive: true });
@@ -2670,12 +1334,17 @@
         const startY = Number(detailEl.dataset.touchStartY);
         const dy = e.touches[0].clientY - startY;
         if (detailEl.classList.contains('detail-expanded')) {
-          if (atTop && dy > 40) {
+          // At top + scroll down → minimize
+          if (atTop && dy > 30) {
             detailEl.classList.remove('detail-expanded');
             detailEl.dataset.touchStartY = e.touches[0].clientY;
           }
         } else {
-          if (atTop && dy > 60) closeDetail();
+          // Scroll up from panel (e.g. drag up from handle or top) → expand to full screen
+          if (dy < -35) {
+            detailEl.classList.add('detail-expanded');
+            detailEl.dataset.touchStartY = e.touches[0].clientY;
+          } else if (atTop && dy > 60) closeDetail();
         }
       }, { passive: true });
     }
@@ -2688,8 +1357,7 @@
 
     // Actual search function (will be debounced)
     async function performSearch(query, dropdown) {
-      const queryLower = String(query || '').trim().toLowerCase();
-      if (!queryLower) return;
+      const queryLower = query.toLowerCase();
 
       // Check cache first (version must match so we don't use stale profile picture shape)
       const cacheKey = queryLower;
@@ -2757,11 +1425,12 @@
 
         const data = await response.json();
         const matches = data.results.map(member => {
-          const existingIndex = pointMetadata.findIndex(m => m.id == member.objectId);
+          const id = member.objectId;
+          const existingIndex = memberIndexMap.has(id) ? memberIndexMap.get(id) : -1;
           const fileObj = member.proPic || member.profilePicture;
           return {
             member: {
-              id: member.objectId,
+              id,
               username: member.username || 'Anonymous',
               profilePicture: fileObj || null,
               sobrietyDate: member.sobrietyDate?.iso ?? null,
@@ -2774,7 +1443,7 @@
               riskLevel: 'medium',
               totalComments: member.TotalComments || 0
             },
-            index: existingIndex, // Will be -1 if not in universe
+            index: existingIndex,
             isNew: existingIndex === -1
           };
         });
@@ -3160,22 +1829,23 @@
     async function selectSearchResult(result) {
       const dropdown = document.getElementById('search-dropdown');
       const searchInput = document.querySelector('#search input');
-
-      dropdown.classList.remove('visible');
-      searchInput.value = '';
+      if (dropdown) dropdown.classList.remove('visible');
+      if (searchInput) searchInput.value = '';
 
       let indexToFlash = -1;
       if (result.isNew) {
-        console.log('Adding new user to universe:', result.member.username);
         indexToFlash = await addMemberToUniverse(result.member);
       } else {
-        if (result.index >= 0 && result.index < pointMetadata.length) {
-          const meta = pointMetadata[result.index];
+        // Resolve index at click time (universe may have loaded since search ran)
+        const id = result.member && result.member.id;
+        const resolvedIndex = (id != null && memberIndexMap.has(id)) ? memberIndexMap.get(id) : result.index;
+        if (resolvedIndex >= 0 && resolvedIndex < pointMetadata.length) {
+          const meta = pointMetadata[resolvedIndex];
           if (meta && !meta.profilePicture && result.member.profilePicture) {
             meta.profilePicture = result.member.profilePicture;
           }
+          indexToFlash = resolvedIndex;
         }
-        indexToFlash = result.index;
       }
       if (indexToFlash >= 0 && pointMetadata[indexToFlash]) {
         flashPoint(indexToFlash);
@@ -3672,6 +2342,24 @@
     }
 
     let _loadingPostsForUser = null; // guard against concurrent fetches for same user
+    const MAX_POSTS_FETCH = 250;       // cap fetch for members with huge post counts (performance)
+    const POST_GRID_INITIAL = 48;      // show this many in grid first; "Load more" for the rest
+    const POST_GRID_LOAD_MORE = 48;
+    let _postsAbortController = null;
+    let _currentPostsForGrid = null;
+    let _currentPostsUserId = null;
+    let _postsGridShownCount = POST_GRID_INITIAL;
+
+    function buildPostItemHTML(post, userId) {
+      let mediaUrl = typeof post.image === 'string' ? post.image : (post.image && post.image.url) ? post.image.url : null;
+      const mediaUrlForSrc = getParseFilesProxyUrl(mediaUrl) || mediaUrl;
+      const hasMedia = mediaUrl && mediaUrl.length > 0;
+      const text = (post.content || '').slice(0, 100).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if (hasMedia) {
+        return `<div class="post-item loading" data-post-id="${post.objectId}" data-fallback-text="${text}" onclick="expandPost('${post.objectId}', '${userId}')"><img src="${mediaUrlForSrc}" data-src="${mediaUrl}" crossorigin="anonymous" alt="Post" onload="this.classList.add('loaded'); this.parentElement.classList.remove('loading');" onerror="_imgBlobFallback(this)" /></div>`;
+      }
+      return `<div class="post-item" data-post-id="${post.objectId}" onclick="expandPost('${post.objectId}', '${userId}')"><div class="post-text">${text || '(no text)'}</div></div>`;
+    }
 
     async function loadUserPosts(userId) {
       _dbgLog('loadUserPosts userId=' + userId + ' host=' + orbitHostId + ' loadingFor=' + _loadingPostsForUser);
@@ -3702,22 +2390,24 @@
         const postDates = allResults.map(p => p.createdAt || null);
         const postImages = allResults.map(p => (typeof p.image === 'string' && p.image) ? p.image : (p.image && typeof p.image === 'object' && p.image.url) ? p.image.url : null);
         spawnOrbitingPosts(userId, allResults.length, postCommentCounts, postIds, postDates, postImages);
-        postsGrid.innerHTML = allResults.map((post) => {
-          let mediaUrl = typeof post.image === 'string' ? post.image : (post.image && post.image.url) ? post.image.url : null;
-          const mediaUrlForSrc = getParseFilesProxyUrl(mediaUrl) || mediaUrl;
-          const hasMedia = mediaUrl && mediaUrl.length > 0;
-          const text = (post.content || '').slice(0, 100).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          if (hasMedia) {
-            return `<div class="post-item loading" data-post-id="${post.objectId}" data-fallback-text="${text}" onclick="expandPost('${post.objectId}', '${userId}')"><img src="${mediaUrlForSrc}" data-src="${mediaUrl}" crossorigin="anonymous" alt="Post" onload="this.classList.add('loaded'); this.parentElement.classList.remove('loading');" onerror="_imgBlobFallback(this)" /></div>`;
-          }
-          return `<div class="post-item" data-post-id="${post.objectId}" onclick="expandPost('${post.objectId}', '${userId}')"><div class="post-text">${text || '(no text)'}</div></div>`;
-        }).join('');
+        _currentPostsForGrid = allResults;
+        _currentPostsUserId = userId;
+        _postsGridShownCount = POST_GRID_INITIAL;
+        const initial = allResults.slice(0, POST_GRID_INITIAL);
+        const cappedMsg = cachedPosts.capped ? `<p class="posts-capped-msg">Showing first ${allResults.length} posts</p>` : '';
+        const loadMoreBtn = allResults.length > POST_GRID_INITIAL
+          ? `<div class="posts-load-more-wrap"><button type="button" class="btn btn-secondary posts-load-more-btn" data-user-id="${userId}">Load more posts</button></div>` : '';
+        postsGrid.innerHTML = cappedMsg + initial.map((p) => buildPostItemHTML(p, userId)).join('') + loadMoreBtn;
         updateDetailPlanetsCount(userId, allResults.length);
         return;
       }
 
       _loadingPostsForUser = userId;
       postsGrid.innerHTML = '<div class="posts-loading">Loading posts...</div>';
+
+      if (_postsAbortController) _postsAbortController.abort();
+      const aborter = new AbortController();
+      _postsAbortController = aborter;
 
       try {
         // Fetch user's posts from Back4App in chunks so we can load more than 100.
@@ -3731,6 +2421,7 @@
         const wherePlain = { creator: userId };
 
         const fetchPage = async (skip, usePointer) => {
+          if (aborter.signal.aborted) return null;
           const where = usePointer ? wherePointer : wherePlain;
           const params = new URLSearchParams({
             where: JSON.stringify(where),
@@ -3740,7 +2431,7 @@
             keys,
           });
           const response = await fetch(`https://parseapi.back4app.com/classes/post?${params}`, {
-            method: 'GET', headers: POST_HEADERS
+            method: 'GET', headers: POST_HEADERS, signal: aborter.signal
           });
           if (!response.ok) return null;
           return response.json();
@@ -3749,12 +2440,15 @@
         let allResults = [];
         let skip = 0;
         let usePointer = true;
+        let postsCapped = false;
 
         while (true) {
           if (selectedMemberIndex == null || !pointMetadata[selectedMemberIndex] || pointMetadata[selectedMemberIndex].id !== userId) {
+            aborter.abort();
             return;
           }
           let data = await fetchPage(skip, usePointer);
+          if (aborter.signal.aborted) return;
           if (!data || !data.results) {
             if (skip === 0 && usePointer) {
               usePointer = false;
@@ -3768,6 +2462,11 @@
           }
           const page = data.results;
           allResults = allResults.concat(page);
+          if (allResults.length >= MAX_POSTS_FETCH) {
+            postsCapped = true;
+            allResults = allResults.slice(0, MAX_POSTS_FETCH);
+            break;
+          }
           updateDetailPlanetsCount(userId, allResults.length);
           if (page.length < POST_PAGE_SIZE) {
             // If first page was empty with Pointer query, try plain creator fallback (same as original)
@@ -3788,7 +2487,7 @@
 
         // Cache for this user so revisiting doesn't trigger API calls while navigating
         evictPostCachesIfNeeded();
-        postCacheByUser.set(userId, { posts: allResults, timestamp: Date.now() });
+        postCacheByUser.set(userId, { posts: allResults, timestamp: Date.now(), capped: postsCapped });
 
         // Feed posts into codec cache so next evolve() has better mass/post counts (see README "Codec, beams, and planets")
         allResults.forEach((p) => {
@@ -3815,37 +2514,18 @@
         });
         spawnOrbitingPosts(userId, allResults.length, postCommentCounts, postIds, postDates, postImages);
 
-        // Render posts grid (using correct field names: content, image)
-        postsGrid.innerHTML = allResults.map((post, idx) => {
-          // Handle image field (can be string URL or Parse File object)
-          let mediaUrl = null;
-          if (typeof post.image === 'string') {
-            mediaUrl = post.image;
-          } else if (post.image && typeof post.image === 'object' && post.image.url) {
-            mediaUrl = post.image.url;
-          }
-          const mediaUrlForSrc = getParseFilesProxyUrl(mediaUrl) || mediaUrl;
-
-          const hasMedia = mediaUrl && mediaUrl.length > 0;
-          const text = post.content || '';
-
-          if (hasMedia) {
-            const safeText = text.slice(0, 100).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            return `
-              <div class="post-item loading" data-post-id="${post.objectId}" data-fallback-text="${safeText}" onclick="expandPost('${post.objectId}', '${userId}')">
-                <img src="${mediaUrlForSrc}" data-src="${mediaUrl}" crossorigin="anonymous" alt="Post" onload="this.classList.add('loaded'); this.parentElement.classList.remove('loading');" onerror="_imgBlobFallback(this)" />
-              </div>
-            `;
-          } else {
-            return `
-              <div class="post-item" data-post-id="${post.objectId}" onclick="expandPost('${post.objectId}', '${userId}')">
-                <div class="post-text">${text}</div>
-              </div>
-            `;
-          }
-        }).join('');
+        // Render posts grid: initial slice only + "Load more" for big lists (performance for members with many posts)
+        _currentPostsForGrid = allResults;
+        _currentPostsUserId = userId;
+        _postsGridShownCount = POST_GRID_INITIAL;
+        const initialPosts = allResults.slice(0, POST_GRID_INITIAL);
+        const cappedMsg = postsCapped ? `<p class="posts-capped-msg">Showing first ${allResults.length} posts</p>` : '';
+        const loadMoreBtn = allResults.length > POST_GRID_INITIAL
+          ? `<div class="posts-load-more-wrap"><button type="button" class="btn btn-secondary posts-load-more-btn" data-user-id="${userId}">Load more posts</button></div>` : '';
+        postsGrid.innerHTML = cappedMsg + initialPosts.map((p) => buildPostItemHTML(p, userId)).join('') + loadMoreBtn;
 
       } catch (error) {
+        if (error.name === 'AbortError') return;
         console.error('Error loading posts:', error);
         postsGrid.innerHTML = '<div class="posts-loading">Failed to load posts</div>';
       } finally {
@@ -3853,18 +2533,22 @@
       }
     }
 
-    // Expand post view
+    // Expand post view — show panel immediately so click feels instant, then load data
     window.expandPost = async (postId, userId) => {
       const expandedView = document.getElementById('post-expanded');
       const imageEl = document.getElementById('post-expanded-image');
       const textEl = document.getElementById('post-expanded-text');
       const metaEl = document.getElementById('post-expanded-meta');
 
-      // Show expanded view with animation
       expandedView.classList.add('visible');
       expandedView.scrollTop = 0;
+      imageEl.style.display = 'none';
+      textEl.textContent = 'Loading…';
+      metaEl.textContent = '';
+      const commentsList = document.getElementById('post-comments-list');
+      if (commentsList) commentsList.innerHTML = '<div class="comments-loading">Loading…</div>';
 
-      // Fetch full post data
+      // Fetch in background so main thread stays responsive
       try {
         const params = new URLSearchParams({
           where: JSON.stringify({ objectId: postId }),
@@ -4158,10 +2842,10 @@
         varying float vLineDist;
         varying float vStrength;
         void main() {
-          float pulse = sin(vLineDist * 12.0 - time * 4.0) * 0.5 + 0.5;
+          float pulse = sin(vLineDist * 6.0 - time * 1.2) * 0.5 + 0.5;
           float thickMult = 1.0 + vStrength * 1.5;
-          float alpha = (0.20 + pulse * 0.65) * baseAlpha * thickMult * fadeIn;
-          vec3 col = mix(vec3(0.55, 0.35, 1.0), vec3(0.85, 0.7, 1.0), pulse) * colScale;
+          float alpha = (0.55 + pulse * 0.18) * baseAlpha * thickMult * fadeIn;
+          vec3 col = mix(vec3(0.62, 0.45, 1.0), vec3(0.78, 0.65, 1.0), pulse * 0.5) * colScale;
           col = mix(col, vec3(0.90, 0.80, 1.0), vStrength * 0.4);
           gl_FragColor = vec4(col, alpha);
         }
@@ -4292,6 +2976,7 @@
 
         const card = document.createElement('div');
         card.className = 'supporter-card';
+        card.setAttribute('data-member-id', targetId);
         card.style.zIndex = layout.z;
         card.style.transform = `translateX(${layout.x}px) translateX(-50%) rotate(${layout.rotate}deg) scale(${layout.scale})`;
         card.style.left = '0';
@@ -4374,18 +3059,19 @@
     const COMMENT_PAGE_SIZE_LARGE = 400; // larger pages once we have many (fewer round trips for 20K users)
     const MAX_COMMENTS = 15000;
     const POST_CHUNK = 40;           // smaller post batches for better performance / lower latency
-    const BEAM_BATCH_SIZE = 40;      // add this many new beams per page while loading (then merge to one)
+    const BEAM_BATCH_SIZE = 28;      // add this many new beams per page while loading (then merge to one); smaller = less per-frame work
 
     // Planet LOD: first N get full sprites (with images); the rest are drawn as one Points mesh (no cap on total)
     const PLANET_SPRITE_LOD = 80;    // full-detail sprites so most planets can load images; beyond this use points
     // Beam LOD: draw top N strongest connections; full comment count still shown in UI.
-    // Cap scales down for huge connection counts (e.g. 20K comments) to keep FPS smooth.
-    const MAX_BEAM_SEGMENTS = 120;  // max beams when connection count is low
+    // Tuned for FPS: lower caps and aggressive throttle when many beams (see animate()).
+    const MAX_BEAM_SEGMENTS = 56;   // max beams when connection count is low
     function getBeamSegmentCap(uniqueTargetCount) {
-      if (uniqueTargetCount <= 200) return 120;
-      if (uniqueTargetCount <= 1000) return 100;
-      if (uniqueTargetCount <= 5000) return 80;
-      return 60; // 20K+ comments: draw only top 60 for smooth rendering
+      if (uniqueTargetCount <= 80) return 56;
+      if (uniqueTargetCount <= 250) return 44;
+      if (uniqueTargetCount <= 800) return 36;
+      if (uniqueTargetCount <= 4000) return 28;
+      return 24; // 20K+ comments: draw only top 24 for smooth FPS
     }
 
     async function drawConnectionLines(userId) {
@@ -4490,7 +3176,13 @@
               }
             });
 
-            if (!stale()) updateDetailBeamsCount(userId, allComments.length);
+            if (!stale()) {
+              const now = Date.now();
+              if (now - _lastDetailBeamsCountUpdate >= DETAIL_COUNTER_THROTTLE_MS) {
+                _lastDetailBeamsCountUpdate = now;
+                updateDetailBeamsCount(userId, allComments.length);
+              }
+            }
 
             // Add another batch of beams this page (LOD-capped; new targets only) so more beams load as data arrives
             const targetPairs = Object.keys(engagementCount)
@@ -4517,6 +3209,7 @@
           }
 
           if (allComments.length === 0) return;
+          if (!stale()) updateDetailBeamsCount(userId, allComments.length);
         }
 
         if (stale()) {
@@ -4716,22 +3409,24 @@
       if (clearBtn) clearBtn.style.display = 'none';
     }
 
+    let _animateRafId = null;
+    let _sceneDisposed = false;
     function animate() {
-      requestAnimationFrame(animate);
+      _animateRafId = requestAnimationFrame(animate);
+      if (_sceneDisposed || !renderer || !scene || !camera) return;
 
-      // Update FPS
+      // Update FPS and stats (throttle DOM writes: FPS/memory every 1s, draws every 500ms)
       frameCount++;
       const now = performance.now();
       if (now - lastTime >= 1000) {
         fps = frameCount;
         frameCount = 0;
         lastTime = now;
-        document.getElementById('fps').textContent = fps;
-
-        // Update memory if available
+        const fpsEl = document.getElementById('fps');
+        if (fpsEl) fpsEl.textContent = fps;
         if (performance.memory) {
-          const mem = performance.memory.usedJSHeapSize / 1024 / 1024;
-          document.getElementById('memory').textContent = mem.toFixed(1) + ' MB';
+          const memEl = document.getElementById('memory');
+          if (memEl) memEl.textContent = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1) + ' MB';
         }
       }
 
@@ -4750,9 +3445,11 @@
         points.material.uniforms.time.value = now / 1000;
       }
 
-      // Throttle beam/planet updates to every 3rd frame to keep FPS high during rotate
+      // Throttle beam/planet updates; when detail panel is open do less work so clicks stay responsive
       _heavyUpdateTick++;
-      const doHeavyUpdate = (_heavyUpdateTick % 3 === 0);
+      const panelOpen = selectedMemberIndex !== null;
+      const heavyInterval = panelOpen ? 6 : 3;
+      const doHeavyUpdate = (_heavyUpdateTick % heavyInterval === 0);
 
       // Don't render or update beams/planets only during travel (fly-to), not during rotate
       const beamsVisible = !_isTraveling;
@@ -4820,11 +3517,15 @@
         }
       }
 
-      // Update connection lines to follow moving stars (throttled; paused only during travel)
+      // Update connection lines — LOD throttle by beam count for FPS (fewer updates when many beams)
       if (doHeavyUpdate && !_isTraveling) {
         const beamCount = activeConnectionLine && activeConnectionLine.batches && activeConnectionLine.batches[0]
           ? activeConnectionLine.batches[0].targetIndices.length : 0;
-        const skipBeamUpdate = beamCount > 80 && (_heavyUpdateTick % 6 !== 0);
+        let beamInterval = 1;
+        if (panelOpen) beamInterval = 8;
+        else if (beamCount > 44) beamInterval = 4;
+        else if (beamCount > 28) beamInterval = 2;
+        const skipBeamUpdate = (beamInterval > 1) && (_heavyUpdateTick % beamInterval !== 0);
         if (!skipBeamUpdate) updateConnectionLinePositions();
       }
 
@@ -4859,8 +3560,11 @@
         }
       }
 
-      // Update draw calls
-      document.getElementById('draws').textContent = renderer.info.render.calls;
+      // Update draw calls (throttle to ~2×/s to reduce DOM writes and layout)
+      if (frameCount % 30 === 0) {
+        const drawsEl = document.getElementById('draws');
+        if (drawsEl) drawsEl.textContent = renderer.info.render.calls;
+      }
 
       // Render
       renderer.render(scene, camera);
@@ -4870,6 +3574,9 @@
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
+      const mobile = window.innerWidth <= 768;
+      const maxPR = mobile ? 1.5 : 2;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPR));
     }
 
     function onKeyDown(event) {
@@ -5142,6 +3849,7 @@
             cluster: 'Real Data',
           };
         } else {
+          if (nextIndex >= MAX_POINTS_DISPLAYED) return; // FPS cap: don't add more points
           // APPEND new member (member.position can be null from back4app feed)
           const p = member.position;
           const px = p && typeof p.x === 'number' ? p.x : 0;
@@ -5307,39 +4015,48 @@
       return syntheticCount >= Math.min(5, sample.length);
     }
 
+    const SNAPSHOT_MAX_MEMBERS = 30000; // Cap to avoid localStorage quota (typical ~5MB); restore still works, incremental load continues
+    const MAX_POINTS_DISPLAYED = 100000; // Cap rendered stars for FPS; data still loads, only first N shown
+    let _snapshotQuotaWarned = false;
+
     function saveSnapshot(skips) {
-      // Serialize the current point cloud into a compact member array.
       if (!pointMetadata || pointMetadata.length === 0) return;
       const geo = points && points.geometry;
       const posArr = geo ? geo.attributes.position.array : null;
       const sizeArr = geo ? geo.attributes.size.array : null;
       const actArr = geo ? geo.attributes.activity.array : null;
 
-      const members = pointMetadata.map((m, i) => {
+      const total = pointMetadata.length;
+      const cap = Math.min(total, SNAPSHOT_MAX_MEMBERS);
+      const members = [];
+      for (let i = 0; i < cap; i++) {
+        const m = pointMetadata[i];
         const x = posArr ? posArr[i * 3]     : (m?.position != null && typeof m.position.x === 'number' ? m.position.x : 0);
         const y = posArr ? posArr[i * 3 + 1] : (m?.position != null && typeof m.position.y === 'number' ? m.position.y : 0);
         const z = posArr ? posArr[i * 3 + 2] : (m?.position != null && typeof m.position.z === 'number' ? m.position.z : 0);
-        return {
+        members.push({
           id:            m.id,
           username:      m.username,
-          proPic:        m.profilePicture || null,
-          x, y, z,
-          size:          sizeArr ? sizeArr[i] : 1,
-          activity:      actArr  ? actArr[i]  : 0,
+          proPic:        i < 15000 ? (m.profilePicture || null) : null, // omit proPic for tail to save space when capped
+          x: +(Number(x) || 0).toFixed(2),
+          y: +(Number(y) || 0).toFixed(2),
+          z: +(Number(z) || 0).toFixed(2),
+          size:          sizeArr ? +(sizeArr[i] || 1).toFixed(2) : 1,
+          activity:      actArr  ? +(actArr[i] || 0).toFixed(2) : 0,
           sobrietyDays:  m.sobrietyDays || 0,
-        };
-      });
+        });
+      }
 
       const snap = {
         version:   SNAPSHOT_VERSION,
         timestamp: Date.now(),
-        skips,
+        skips:     cap < total ? { ...skips, totalMembers: cap } : skips,
         members,
       };
 
       try {
         localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
-        updateSnapshotStatus(members.length, snap.timestamp);
+        updateSnapshotStatus(members.length, snap.timestamp, cap < total ? ` (capped ${cap.toLocaleString()})` : '');
         // Persist beam + post caches so after restore we don't refetch when navigating to same members
         if (typeof beamDataCache !== 'undefined' && typeof postCacheByUser !== 'undefined') {
           const beamEntries = [];
@@ -5368,28 +4085,26 @@
           } catch (eNav) { /* quota; skip nav cache */ }
         }
       } catch (e) {
-        // localStorage quota exceeded — round-trip coordinates to 3 decimal places to shrink size.
-        // NEVER strip proPic — that causes profile images to go blank after restore.
-        const compact = {
-          ...snap,
-          members: members.map(m => ({
-            id: m.id,
-            username: m.username,
-            proPic: m.proPic || null,
-            x: +(Number(m.x) || 0).toFixed(3),
-            y: +(Number(m.y) || 0).toFixed(3),
-            z: +(Number(m.z) || 0).toFixed(3),
-            size: +m.size.toFixed(2),
-            activity: +m.activity.toFixed(3),
-            sobrietyDays: m.sobrietyDays || 0,
-          }))
-        };
+        // Quota exceeded — try smaller cap and no proPic for tail
+        const smaller = members.slice(0, Math.min(members.length, 15000)).map(m => ({
+          id: m.id,
+          username: m.username,
+          proPic: null,
+          x: m.x,
+          y: m.y,
+          z: m.z,
+          size: m.size,
+          activity: m.activity,
+          sobrietyDays: m.sobrietyDays || 0,
+        }));
         try {
-          localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(compact));
-          updateSnapshotStatus(members.length, snap.timestamp, '(compact)');
+          localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ ...snap, members: smaller }));
+          updateSnapshotStatus(smaller.length, snap.timestamp, '(reduced)');
         } catch (e2) {
-          // Still too large — skip snapshot entirely rather than saving broken data
-          console.warn('[Snapshot] localStorage full even after compaction, skipping save:', e2.message);
+          if (!_snapshotQuotaWarned) {
+            _snapshotQuotaWarned = true;
+            console.warn('[Snapshot] localStorage full, skipping save. Clear site data or use fewer members.');
+          }
         }
       }
     }
@@ -5403,11 +4118,13 @@
 
       if (members.length === 0) return 0;
 
-      const positions   = new Float32Array(members.length * 3);
-      const colors      = new Float32Array(members.length * 3);
-      const sizes       = new Float32Array(members.length);
-      const activities  = new Float32Array(members.length);
-      const vertexIdxs  = new Float32Array(members.length);
+      const toShow = members.slice(0, MAX_POINTS_DISPLAYED);
+      const n = toShow.length;
+      const positions   = new Float32Array(n * 3);
+      const colors      = new Float32Array(n * 3);
+      const sizes       = new Float32Array(n);
+      const activities  = new Float32Array(n);
+      const vertexIdxs  = new Float32Array(n);
 
       // Support both top-level x,y,z and nested position: { x, y, z } (old snapshot format)
       function getCoord(m, axis) {
@@ -5416,7 +4133,7 @@
         return Number.isFinite(n) ? n : 0;
       }
 
-      members.forEach((m, i) => {
+      toShow.forEach((m, i) => {
         const mx = getCoord(m, 'x');
         const my = getCoord(m, 'y');
         const mz = getCoord(m, 'z');
@@ -5505,7 +4222,7 @@
         } catch (eNav) { /* ignore */ }
       }
 
-      return members.length;
+      return members.length; // report full count; only toShow.length are rendered
     }
 
     function updateSnapshotStatus(count, timestamp, suffix = '') {
@@ -5600,25 +4317,25 @@
         });
 
         // 3. Dynamic import of Back4App and codec modules
-        const back4appModule = await import('./lib/back4app.js');
-        const codecModule = await import('./lib/codec.js');
+        const back4appModule = await import('../../lib/back4app.js');
+        const codecModule = await import('../../lib/codec.js');
         const { feedFromBack4App, DEFAULT_CONFIG } = back4appModule;
         const { createState, evolve, DEFAULT_PARAMS } = codecModule;
 
         updateJob(job.id, { message: 'Initializing state...', progress: 10 });
 
         const state = createState();
-        const BATCH_SIZE = 500;
-        const MAX_MEMBERS = 600000; // Target all members
-        const MAX_BATCHES_PER_RUN = 5; // Load 5 batches per run, then pause
+        const BATCH_SIZE = 1000;   // Larger batches = fewer API calls (Parse limit 1000)
+        const MAX_MEMBERS = 600000;
+        const MAX_BATCHES_PER_RUN = 5;
 
         // 4. Continuous loading loop
         let batchesThisRun = 0;
         while (!skips.isComplete && skips.totalMembers < MAX_MEMBERS && batchesThisRun < MAX_BATCHES_PER_RUN) {
           const batchConfig = {
             userLimit: BATCH_SIZE,
-            postLimit: 100,
-            commentLimit: 200,
+            postLimit: 200,
+            commentLimit: 300,
             soberDateChangeLimit: 0,
           };
 
@@ -5648,8 +4365,8 @@
             break;
           }
 
-          // Small delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Minimal delay to avoid rate limiting (reduced for faster loading)
+          await new Promise(resolve => setTimeout(resolve, 50));
         }
 
         // 5. Merge beam-loaded comments and on-demand loaded posts into state so codec uses them (no need to re-fetch)
@@ -5701,8 +4418,8 @@
           updateJob(job.id, { message: 'Saving snapshot...', progress: 97 });
           saveSnapshot(skips);
 
-          // 9. Background training: extra evolution steps so more comments = more gravity (pairs pulled closer)
-          const TRAIN_STEPS = 6;
+          // 9. Refinement: run training steps in setTimeout so main thread can handle touch/wheel (avoid long requestIdleCallback)
+          const TRAIN_STEPS = 3;
           let trainStep = 0;
           function runTrainingStep() {
             if (trainStep >= TRAIN_STEPS) {
@@ -5711,15 +4428,14 @@
               return;
             }
             trainStep++;
-            updateJob(job.id, { message: `Refining layout (comment gravity) ${trainStep}/${TRAIN_STEPS}...`, progress: 97 });
+            updateJob(job.id, { message: `Refining layout ${trainStep}/${TRAIN_STEPS}...`, progress: 97 });
             evolve(state, DEFAULT_PARAMS);
             enrichPointCloudData(state);
             saveSnapshot(skips);
-            const cb = typeof requestIdleCallback !== 'undefined' ? requestIdleCallback : (fn) => setTimeout(fn, 50);
-            cb(runTrainingStep, { timeout: 200 });
+            setTimeout(runTrainingStep, 0);
           }
           if (state.comments && state.comments.size > 0) {
-            runTrainingStep();
+            setTimeout(runTrainingStep, 0);
           }
         }
 
@@ -5775,7 +4491,4 @@
       }
     }, 1000);
 
-    init();
-  </script>
-</body>
-</html>
+    // init() is called by React PointCloudApp with container ref
