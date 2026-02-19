@@ -1479,8 +1479,8 @@
       // Keyboard shortcuts
       window.addEventListener('keydown', onKeyDown);
 
-      // When URL hash changes (e.g. back/forward or manual edit), select that user if in universe
-      window.addEventListener('hashchange', applyUserFromUrl);
+      // When URL path changes (back/forward or manual edit), select that user if in universe
+      window.addEventListener('popstate', applyUserFromUrl);
 
       // If navigating directly to a user via URL, show loading screen until we're ready (min 2s)
       if (getSlugFromUrl()) {
@@ -2077,9 +2077,15 @@
       selectedLabel = null;
     }
 
+    /** URL is path-based: / for root, /username for a user. No hash or test-point-cloud in path. */
     function getSlugFromUrl() {
-      const hash = location.hash.slice(1).replace(/^\//, '');
-      return hash || null;
+      const path = location.pathname.replace(/^\//, '').split('/')[0] || '';
+      if (!path || path === 'test-point-cloud.html' || path === 'index.html') return null;
+      try {
+        return decodeURIComponent(path) || null;
+      } catch (_) {
+        return path || null;
+      }
     }
 
     /** Resolve URL slug (id or username, case-insensitive) to member index, or undefined. */
@@ -2105,16 +2111,16 @@
     }
 
     function setUrlForUser(userId, username) {
-      const base = location.pathname + location.search;
+      const root = '/';
       if (!userId) {
-        history.replaceState(null, '', base);
+        history.replaceState(null, '', root + location.search);
         return;
       }
       const raw = (username && username !== 'Anonymous' && !/^User\d+$/i.test(String(username)))
         ? username
         : userId;
-      const display = String(raw).trim();
-      history.replaceState(null, '', base + '#/' + encodeURIComponent(display));
+      const slug = String(raw).trim();
+      history.replaceState(null, '', root + encodeURIComponent(slug) + location.search);
     }
 
     const GOD_VIEW_POSITION = { x: 120, y: 0, z: 80 };
@@ -3334,10 +3340,9 @@
           ctx.stroke();
 
           if (sprite && sprite.material) {
-            // Verify canvas is not origin-tainted before uploading to WebGL.
-            // A tainted canvas causes gl.texImage2D to silently fail, leaving an
-            // invisible (all-zero) texture. Keep the placeholder if tainted.
             try { ctx.getImageData(0, 0, 1, 1); } catch(taintErr) { return; }
+            const oldMap = sprite.material.map;
+            if (oldMap) { oldMap.dispose(); }
             const tex = new THREE.CanvasTexture(c);
             sprite.material.map = tex;
             sprite.material.needsUpdate = true;
@@ -3521,18 +3526,16 @@
 
         const mat = new THREE.SpriteMaterial({
           map:         texture,
-          transparent: true,
+          transparent: false,
           depthWrite:  false,
           depthTest:   false,
-          blending:    THREE.NormalBlending,
-          opacity:     0.0,
+          opacity:     1,
         });
         const sprite = new THREE.Sprite(mat);
         sprite.renderOrder = 10;
         sprite.scale.set(wSize, wSize, 1);
         sprite.frustumCulled = false;
-        const spawnDelay = i * 60;
-        sprite.userData = { index: i, postId: postIds ? postIds[idx] : null, _spawnTime: performance.now() + spawnDelay, _baseScale: wSize };
+        sprite.userData = { index: i, postId: postIds ? postIds[idx] : null, _baseScale: wSize };
         orbitingPosts.add(sprite);
 
         const imgUrl = postImages && postImages[idx];
@@ -3555,12 +3558,10 @@
         const pointsMat = new THREE.PointsMaterial({
           size: 0.12,
           map: dotTexture,
-          transparent: true,
-          opacity: 0.88,
+          transparent: false,
           depthTest: false,
           depthWrite: false,
           sizeAttenuation: true,
-          blending: THREE.NormalBlending,
         });
         const overflowPoints = new THREE.Points(geo, pointsMat);
         overflowPoints.renderOrder = 10;
@@ -3611,7 +3612,9 @@
               ctx.beginPath();
               ctx.arc(cx, cx, imgR, 0, Math.PI * 2);
               ctx.stroke();
-              if (sprite && sprite.material) {
+              if (sprite && sprite.material && sprite.parent === orbitingPosts) {
+                const oldMap = sprite.material.map;
+                if (oldMap) oldMap.dispose();
                 const tex = new THREE.CanvasTexture(c);
                 tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
                 sprite.material.map = tex;
@@ -4060,10 +4063,10 @@
 
     // In-memory cache: loaded comment/engagement data per user so we don't re-fetch. Also used to train codec.
     const BEAM_CACHE_TTL_MS = 60 * 60 * 1000;  // 1 hour — fewer API calls when revisiting members while navigating
-    const BEAM_CACHE_MAX = 25;                  // LRU cap so FPS doesn't drop as we navigate to many users
+    const BEAM_CACHE_MAX = 12;                  // LRU cap — keep low so FPS stays good after many navigations
     const POST_CACHE_TTL_MS = 60 * 60 * 1000;   // 1 hour — per-user post cache so revisiting doesn't refetch
-    const POST_CACHE_BY_USER_MAX = 20;          // cap per-user post cache entries
-    const POST_DATA_CACHE_MAX = 4000;           // cap total post metadata (postId -> {...})
+    const POST_CACHE_BY_USER_MAX = 10;          // cap per-user post cache entries
+    const POST_DATA_CACHE_MAX = 2000;           // cap total post metadata (postId -> {...})
     const beamDataCache = new Map(); // userId -> { engagementCount, postCreatorMap, commentsForCodec, timestamp }
     window.getBeamCommentCacheForCodec = () => beamDataCache; // so load job can merge into state.comments
 
@@ -4775,25 +4778,9 @@
                 const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
                 const refD = Math.sqrt((hx - camera.position.x) ** 2 + (hy - camera.position.y) ** 2 + (hz - camera.position.z) ** 2) || 1;
                 const factor = Math.max(0.28, Math.min(1.4, refD / d));
+                // Halo: selected planet scales up
                 const scale = baseScale * factor * (i === selectedPlanetIndex ? 1.35 : 1);
                 sprite.scale.setScalar(scale);
-                // Glow 3x less bright when not selected
-                const targetOpacity = i === selectedPlanetIndex ? 0.92 : 0.92 / 3;
-                if (!sprite.userData._fullyVisible) {
-                  const FADE_DURATION = 500;
-                  const age = performance.now() - (sprite.userData._spawnTime || 0);
-                  if (age <= 0) sprite.material.opacity = 0;
-                  else if (age < FADE_DURATION) sprite.material.opacity = (age / FADE_DURATION) * targetOpacity;
-                  else {
-                    sprite.material.opacity = targetOpacity;
-                    sprite.userData._fullyVisible = true;
-                  }
-                } else if (sprite.material.opacity < 0.1) {
-                  sprite.material.opacity = targetOpacity;
-                  sprite.material.needsUpdate = true;
-                } else {
-                  sprite.material.opacity = targetOpacity;
-                }
               }
             } else {
               // LOD overflow: write into Points position buffer (j = i - numSprites)

@@ -6,12 +6,13 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: 'default-root',
+      name: 'spa-fallback',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          if (req.url === '/' || req.url === '') {
-            req.url = '/test-point-cloud.html';
-          }
+          const path = req.url?.split('?')[0] || '';
+          const isRoot = path === '/' || path === '';
+          const isPathRoute = path.startsWith('/') && !path.includes('.') && path !== '/parse-api' && path.indexOf('/parsefiles-proxy') !== 0;
+          if (isRoot || isPathRoute) req.url = '/test-point-cloud.html';
           next();
         });
       },
