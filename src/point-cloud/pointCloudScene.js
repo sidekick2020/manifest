@@ -946,6 +946,7 @@
       memberIndexMap.set(id, nextIndex);
       loadedMemberIds.add(id);
       syncUsernameToIndexMap();
+      await loadPostsAndCommentsForUser(id);
       return nextIndex;
     }
 
@@ -2960,6 +2961,141 @@
       if (typeof val === 'string') return val;
       if (typeof val === 'object' && val.objectId) return val.objectId;
       return null;
+    }
+
+    /** Pre-load posts and comments for a user (e.g. URL-loaded user) so detail panel and beams show without extra fetches. */
+    async function loadPostsAndCommentsForUser(userId) {
+      const HEADERS = {
+        'X-Parse-Application-Id': 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by',
+        'X-Parse-REST-API-Key': 'rNXb9qIR6wrZ3n81OG33HVQkpPsXANUatiOE5HSq'
+      };
+      const POST_PAGE = 40;
+      const MAX_POSTS_PRELOAD = 250;
+      const COMMENT_PAGE = 150;
+      const POST_CHUNK = 40;
+      const MAX_COMMENTS_PRELOAD = 2000;
+
+      try {
+        // 1) Fetch posts
+        const postKeys = 'objectId,content,image,createdAt,commentCount';
+        const wherePointer = { creator: { __type: 'Pointer', className: '_User', objectId: userId } };
+        const wherePlain = { creator: userId };
+        let allPosts = [];
+        let postsCapped = false;
+        let skip = 0;
+        let usePointer = true;
+        while (true) {
+          const where = usePointer ? wherePointer : wherePlain;
+          const params = new URLSearchParams({
+            where: JSON.stringify(where),
+            order: '-createdAt',
+            limit: String(POST_PAGE),
+            skip: String(skip),
+            keys: postKeys,
+          });
+          const res = await fetch(`https://parseapi.back4app.com/classes/post?${params}`, { method: 'GET', headers: HEADERS });
+          if (!res.ok) break;
+          const data = await res.json();
+          if (!data.results || data.results.length === 0) {
+            if (skip === 0 && usePointer) { usePointer = false; continue; }
+            break;
+          }
+          const page = data.results;
+          allPosts = allPosts.concat(page);
+          if (allPosts.length >= MAX_POSTS_PRELOAD) {
+            postsCapped = true;
+            allPosts = allPosts.slice(0, MAX_POSTS_PRELOAD);
+            break;
+          }
+          if (page.length < POST_PAGE) break;
+          skip += page.length;
+        }
+        evictPostCachesIfNeeded();
+        postCacheByUser.set(userId, { posts: allPosts, timestamp: Date.now(), capped: postsCapped });
+        allPosts.forEach((p) => {
+          const id = p.objectId;
+          if (!id) return;
+          const creator = p.creator?.objectId || p.creator || userId;
+          postDataCache.set(id, {
+            creator,
+            content: p.content || '',
+            commentCount: p.commentCount || 0,
+            created: p.createdAt || p.created,
+            image: typeof p.image === 'string' ? p.image : (p.image && typeof p.image === 'object' && p.image.url) ? p.image.url : null,
+          });
+        });
+
+        // 2) Fetch comments and build postCreatorMap for beams
+        let allComments = [];
+        let postCreatorMap = {};
+        let commentCreatorQuery = { creator: { __type: 'Pointer', className: '_User', objectId: userId } };
+        let usedPointerQuery = true;
+        let lastCreatedAt = null;
+        while (allComments.length < MAX_COMMENTS_PRELOAD) {
+          const where = lastCreatedAt
+            ? { $and: [commentCreatorQuery, { createdAt: { $gt: { __type: 'Date', iso: lastCreatedAt } } }] }
+            : commentCreatorQuery;
+          const p = new URLSearchParams({
+            where: JSON.stringify(where),
+            limit: String(COMMENT_PAGE),
+            keys: 'creator,post,createdAt',
+            order: 'createdAt',
+          });
+          const resp = await fetch(`https://parseapi.back4app.com/classes/comment?${p}`, { method: 'GET', headers: HEADERS });
+          if (!resp.ok) break;
+          const cData = await resp.json();
+          if ((!cData.results || cData.results.length === 0) && usedPointerQuery && !lastCreatedAt) {
+            commentCreatorQuery = { creator: userId };
+            usedPointerQuery = false;
+            continue;
+          }
+          if (!cData.results || cData.results.length === 0) break;
+          allComments = allComments.concat(cData.results);
+          const last = cData.results[cData.results.length - 1];
+          lastCreatedAt = (last && last.createdAt && last.createdAt.iso) ? last.createdAt.iso : (last && last.createdAt);
+          if (!lastCreatedAt || cData.results.length < COMMENT_PAGE) break;
+          // Resolve post creators for this page
+          const pagePostIds = [...new Set(cData.results.map((c) => parseId(c.post)).filter(Boolean))];
+          for (let pi = 0; pi < pagePostIds.length; pi += POST_CHUNK) {
+            const chunk = pagePostIds.slice(pi, pi + POST_CHUNK);
+            const pp = new URLSearchParams({
+              where: JSON.stringify({ objectId: { $in: chunk } }),
+              keys: 'objectId,creator',
+              limit: String(chunk.length),
+            });
+            const r = await fetch(`https://parseapi.back4app.com/classes/post?${pp}`, { method: 'GET', headers: HEADERS });
+            if (!r.ok) continue;
+            const j = await r.json();
+            (j.results || []).forEach((post) => {
+              const creatorId = parseId(post.creator);
+              if (post.objectId && creatorId) postCreatorMap[post.objectId] = creatorId;
+            });
+          }
+        }
+        let engagementCount = {};
+        allComments.forEach((c) => {
+          const postId = parseId(c.post);
+          const creatorId = postId ? postCreatorMap[postId] : null;
+          if (creatorId && creatorId !== userId) {
+            engagementCount[creatorId] = (engagementCount[creatorId] || 0) + 1;
+          }
+        });
+        const commentsForCodec = allComments.map((c) => {
+          const postId = parseId(c.post);
+          const toMember = postId ? postCreatorMap[postId] : null;
+          return toMember && toMember !== userId ? { fromMember: userId, toMember, postId } : null;
+        }).filter(Boolean);
+        evictBeamCacheIfNeeded();
+        beamDataCache.set(userId, {
+          engagementCount,
+          postCreatorMap,
+          rawComments: allComments,
+          commentsForCodec,
+          timestamp: Date.now(),
+        });
+      } catch (e) {
+        console.warn('loadPostsAndCommentsForUser failed for', userId, e);
+      }
     }
 
     // Shared beam materials (3 layers) — created once, uniforms updated once per frame for performance
