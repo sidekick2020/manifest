@@ -94,6 +94,16 @@
         if (loadingEl) loadingEl.classList.add('visible');
         _initialUrlUserPending = true;
         _loadingScreenShownAt = Date.now();
+        if (_loadingScreenTimeoutId != null) clearTimeout(_loadingScreenTimeoutId);
+        _loadingScreenTimeoutId = setTimeout(() => {
+          _loadingScreenTimeoutId = null;
+          if (!_initialUrlUserPending) return;
+          _initialUrlUserPending = false;
+          _pendingFlyToIndex = null;
+          const el = document.getElementById('loading-screen');
+          if (el) { el.classList.remove('visible'); el.classList.add('hidden'); }
+          if (points && pointMetadata.length > 0) applyUserFromUrl();
+        }, LOADING_SCREEN_MAX_MS);
       }
 
       // Bottom controls suggestions: hide when user starts using controls
@@ -181,6 +191,10 @@
           _mouseMoveRaf = null;
         }
         clearTimeout(dataLoadTimeoutId);
+        if (_loadingScreenTimeoutId != null) {
+          clearTimeout(_loadingScreenTimeoutId);
+          _loadingScreenTimeoutId = null;
+        }
         window.removeEventListener('resize', onResize);
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('popstate', applyUserFromUrl);
@@ -212,6 +226,8 @@
     let _initialUrlUserPending = false;
     let _loadingScreenShownAt = 0;
     let _pendingFlyToIndex = null;
+    const LOADING_SCREEN_MAX_MS = 15000; // Force-hide after 15s so mobile never sticks (slow/failed load)
+    let _loadingScreenTimeoutId = null;
 
     // Incremental enrichment tracking
     const loadedMemberIds = new Set();
@@ -821,6 +837,10 @@
     const FLY_TO_USER_DURATION_MS = 2800;
 
     function hideLoadingScreenThenFlyToUser(idx) {
+      if (_loadingScreenTimeoutId != null) {
+        clearTimeout(_loadingScreenTimeoutId);
+        _loadingScreenTimeoutId = null;
+      }
       const loadingEl = document.getElementById('loading-screen');
       if (loadingEl) {
         loadingEl.classList.remove('visible');
@@ -834,13 +854,135 @@
       flashPoint(idx, { fromGodView: true });
     }
 
+    /** Fetch one user by username or objectId and add them to the point cloud; returns new index or null. */
+    async function loadUserBySlug(slug) {
+      if (!points || !points.geometry) return null;
+      const decoded = decodeURIComponent(slug).trim();
+      const where = { $or: [{ username: decoded }, { objectId: decoded }] };
+      const params = new URLSearchParams({
+        where: JSON.stringify(where),
+        limit: '1',
+        keys: 'objectId,username,sobrietyDate,createdAt,proPic,profilePicture,updatedAt,TotalComments',
+      });
+      const B4A_HEADERS = {
+        'X-Parse-Application-Id': 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by',
+        'X-Parse-REST-API-Key': 'rNXb9qIR6wrZ3n81OG33HVQkpPsXANUatiOE5HSq',
+      };
+      let res;
+      try {
+        res = await fetch(`https://parseapi.back4app.com/classes/_User?${params}`, { method: 'GET', headers: B4A_HEADERS });
+      } catch (e) {
+        return null;
+      }
+      if (!res.ok) return null;
+      const data = await res.json();
+      const results = data.results || [];
+      if (results.length === 0) return null;
+      const u = results[0];
+      const id = u.objectId;
+      if (memberIndexMap.get(id) !== undefined) return memberIndexMap.get(id);
+
+      const proPicUrl = (u.proPic && (typeof u.proPic === 'string' ? u.proPic : u.proPic.url)) || (u.profilePicture && (typeof u.profilePicture === 'string' ? u.profilePicture : u.profilePicture.url)) || null;
+      const codecModule = await import('../../lib/codec.js');
+      const { createState, evolve, DEFAULT_PARAMS } = codecModule;
+      const state = createState();
+      state.members.set(id, {
+        username: u.username || 'Anonymous',
+        sobriety: u.sobrietyDate?.iso ?? null,
+        created: u.createdAt,
+        proPic: proPicUrl,
+        totalComments: u.TotalComments != null ? Number(u.TotalComments) : null,
+        mass: 1,
+        position: null,
+        opacity: 0,
+        scale: 0,
+      });
+      evolve(state, DEFAULT_PARAMS);
+      const member = state.members.get(id);
+      const pos = member && member.position ? member.position : codecModule.seedToPos(id, 80);
+      const px = typeof pos.x === 'number' ? pos.x : 0;
+      const py = typeof pos.y === 'number' ? pos.y : 0;
+      const pz = typeof pos.z === 'number' ? pos.z : 0;
+
+      const nextIndex = points.geometry.attributes.position.count;
+      if (nextIndex >= MAX_POINTS_DISPLAYED) return null;
+
+      const risk = Math.random();
+      const color = getRiskColor(risk);
+      const oldPos = points.geometry.attributes.position.array;
+      const oldCol = points.geometry.attributes.color.array;
+      const oldSize = points.geometry.attributes.size.array;
+      const oldAct = points.geometry.attributes.activity.array;
+      const oldIdx = points.geometry.attributes.vertexIndex.array;
+      const newPos = new Float32Array(oldPos.length + 3);
+      const newCol = new Float32Array(oldCol.length + 3);
+      const newSize = new Float32Array(oldSize.length + 1);
+      const newAct = new Float32Array(oldAct.length + 1);
+      const newIdxArr = new Float32Array(oldIdx.length + 1);
+      newPos.set(oldPos); newPos[oldPos.length] = px; newPos[oldPos.length + 1] = py; newPos[oldPos.length + 2] = pz;
+      newCol.set(oldCol); newCol[oldCol.length] = color.r; newCol[oldCol.length + 1] = color.g; newCol[oldCol.length + 2] = color.b;
+      newSize.set(oldSize); newSize[oldSize.length] = 2;
+      newAct.set(oldAct); newAct[oldAct.length] = 0;
+      newIdxArr.set(oldIdx); newIdxArr[oldIdx.length] = nextIndex;
+      points.geometry.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
+      points.geometry.setAttribute('color', new THREE.BufferAttribute(newCol, 3));
+      points.geometry.setAttribute('size', new THREE.BufferAttribute(newSize, 1));
+      points.geometry.setAttribute('activity', new THREE.BufferAttribute(newAct, 1));
+      points.geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(newIdxArr, 1));
+      const sobrietyIso = u.sobrietyDate?.iso ?? (typeof u.sobrietyDate === 'string' ? u.sobrietyDate : null);
+      const sobrietyDays = sobrietyIso ? Math.floor((Date.now() - new Date(sobrietyIso).getTime()) / 86400000) : 0;
+      pointMetadata.push({
+        id,
+        username: u.username || 'Anonymous',
+        profilePicture: proPicUrl,
+        position: { x: px, y: py, z: pz },
+        risk: (risk * 100).toFixed(0),
+        riskLevel: risk < 0.33 ? 'low' : risk < 0.66 ? 'medium' : 'high',
+        activity: 0,
+        sobrietyDays,
+        sobrietyDate: sobrietyIso || null,
+        cluster: 'Real Data',
+      });
+      memberIndexMap.set(id, nextIndex);
+      loadedMemberIds.add(id);
+      syncUsernameToIndexMap();
+      return nextIndex;
+    }
+
     function applyUserFromUrl() {
       if (!points || !pointMetadata.length) return;
       const slug = getSlugFromUrl();
       if (!slug) return;
       const idx = getMemberIndexFromSlug(slug);
-      if (idx === undefined || idx === selectedMemberIndex) return;
       if (_initialUrlUserPending) {
+        if (idx === undefined) {
+          // URL user not in current batch — fetch them and add to point cloud, then fly to them
+          loadUserBySlug(slug).then((newIdx) => {
+            if (_loadingScreenTimeoutId != null) { clearTimeout(_loadingScreenTimeoutId); _loadingScreenTimeoutId = null; }
+            _initialUrlUserPending = false;
+            _pendingFlyToIndex = null;
+            if (newIdx != null) {
+              _pendingFlyToIndex = newIdx;
+              const minShowMs = 2000;
+              const elapsed = Date.now() - _loadingScreenShownAt;
+              const delay = Math.max(0, minShowMs - elapsed);
+              setTimeout(() => {
+                if (_pendingFlyToIndex != null) {
+                  const targetIdx = _pendingFlyToIndex;
+                  _pendingFlyToIndex = null;
+                  hideLoadingScreenThenFlyToUser(targetIdx);
+                }
+              }, delay);
+            } else {
+              const loadingEl = document.getElementById('loading-screen');
+              if (loadingEl) { loadingEl.classList.remove('visible'); loadingEl.classList.add('hidden'); loadingEl.setAttribute('aria-busy', 'false'); }
+              camera.position.set(GOD_VIEW_POSITION.x, GOD_VIEW_POSITION.y, GOD_VIEW_POSITION.z);
+              controls.target.set(GOD_VIEW_TARGET.x, GOD_VIEW_TARGET.y, GOD_VIEW_TARGET.z);
+              controls.update();
+            }
+          });
+          return;
+        }
         _initialUrlUserPending = false;
         _pendingFlyToIndex = idx;
         const minShowMs = 2000;
@@ -854,6 +996,7 @@
           }
         }, delay);
       } else {
+        if (idx === undefined || idx === selectedMemberIndex) return;
         flashPoint(idx);
       }
     }
