@@ -3693,39 +3693,40 @@
       };
 
       try {
-        // ── Paginate comment fetch (Back4App max 1000/request, users may have thousands) ──
+        // ── Paginate comment fetch: cursor-based (createdAt) to avoid Back4App skip limits ──
+        // (skip is often capped at 1000; cursor pagination works for any comment count)
         const PAGE_SIZE = 500;
+        const MAX_COMMENTS = 15000; // cap for performance; cursor pagination avoids skip limit
         let allComments = [];
-        let skip = 0;
+        let lastCreatedAt = null; // cursor for next page
         let keepFetching = true;
-        // Try Pointer format first; if empty, fall back to plain string creator ID.
-        // Back4App may store creator as a Pointer to _User or as a plain string ID
-        // depending on how records were written — handle both.
         let commentCreatorQuery = { creator: { __type: 'Pointer', className: '_User', objectId: userId } };
         let usedPointerQuery = true;
 
         while (keepFetching) {
+          const where = lastCreatedAt
+            ? { $and: [commentCreatorQuery, { createdAt: { $gt: { __type: 'Date', iso: lastCreatedAt } } }] }
+            : commentCreatorQuery;
           const p = new URLSearchParams({
-            where: JSON.stringify(commentCreatorQuery),
+            where: JSON.stringify(where),
             limit: String(PAGE_SIZE),
-            skip: String(skip),
-            keys: 'creator,post',
+            keys: 'creator,post,createdAt',
             order: 'createdAt',
           });
           const resp = await fetch(`https://parseapi.back4app.com/classes/comment?${p}`, { method: 'GET', headers: HEADERS });
           if (!resp.ok) break;
           const data = await resp.json();
-          // If Pointer query returns nothing on first page, retry with plain string
-          if ((!data.results || data.results.length === 0) && usedPointerQuery && skip === 0) {
+          if ((!data.results || data.results.length === 0) && usedPointerQuery && !lastCreatedAt) {
             commentCreatorQuery = { creator: userId };
             usedPointerQuery = false;
-            continue; // retry with plain string
+            continue;
           }
           if (!data.results || data.results.length === 0) break;
           allComments = allComments.concat(data.results);
-          if (data.results.length < PAGE_SIZE) keepFetching = false;
-          else skip += PAGE_SIZE;
-          if (allComments.length >= 5000) keepFetching = false;
+          const last = data.results[data.results.length - 1];
+          lastCreatedAt = (last && last.createdAt && last.createdAt.iso) ? last.createdAt.iso : (last && last.createdAt);
+          if (!lastCreatedAt || data.results.length < PAGE_SIZE) keepFetching = false;
+          if (allComments.length >= MAX_COMMENTS) keepFetching = false;
         }
         if (allComments.length === 0) return;
 
@@ -3743,10 +3744,12 @@
         if (postIdSet.size === 0) return;
         const allPostIds = [...postIdSet];
 
-        // ── Fetch posts in chunks of 500 (Back4App $in limit) ──
+        // ── Fetch posts in small chunks to avoid URL length limits (414) ──
+        // 500 IDs in $in can exceed ~2k URL limit; 100 keeps URLs safe and still batches well
+        const POST_CHUNK = 100;
         const postCreatorMap = {};
-        for (let pi = 0; pi < allPostIds.length; pi += 500) {
-          const chunk = allPostIds.slice(pi, pi + 500);
+        for (let pi = 0; pi < allPostIds.length; pi += POST_CHUNK) {
+          const chunk = allPostIds.slice(pi, pi + POST_CHUNK);
           const pp = new URLSearchParams({
             where: JSON.stringify({ objectId: { $in: chunk } }),
             keys: 'objectId,creator',
