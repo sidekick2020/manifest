@@ -17,6 +17,7 @@ export function Scene() {
   const camRef = useRef({ rx: 0.3, ry: 0, trx: 0.3, try: 0, d: 70, td: 70, userZoomed: false, focus: { x: 0, y: 0, z: 0 }, tFocus: { x: 0, y: 0, z: 0 }, focusActive: false });
   const dragRef = useRef({ active: false, last: { x: 0, y: 0 }, click: { x: 0, y: 0 } });
   const screenPosRef = useRef(new Map());
+  const filteredIdsRef = useRef(new Set()); // Current filtered member IDs for click validation
   const bgStarsRef = useRef(null);
   const rafRef = useRef(null);
   const imgCacheRef = useRef(new Map());
@@ -117,7 +118,20 @@ export function Scene() {
       const mx = e.clientX, my = e.clientY;
       let closest = null, closestDist = 25;
       let closestType = null; // Track whether it's member, post, or aggregate
+
+      // Get current location filter to skip non-matching members during hit test
+      const clickStore = useUniverseStore.getState();
+      const locFilter = clickStore.locationFilter;
+      const hasLocF = (locFilter.country && locFilter.country.trim()) ||
+                      (locFilter.region && locFilter.region.trim()) ||
+                      (locFilter.city && locFilter.city.trim());
+
       screenPosRef.current.forEach((sp, id) => {
+        // CRITICAL: Skip members that don't match the active location filter
+        // This prevents invisible (filtered-out) members from intercepting clicks
+        if (hasLocF && !id.startsWith('aggregate:') && !id.startsWith('post:')) {
+          if (!filteredIdsRef.current.has(id)) return;
+        }
         const d = Math.sqrt((sp.x - mx) ** 2 + (sp.y - my) ** 2);
         if (d < closestDist) {
           closestDist = d;
@@ -406,6 +420,11 @@ export function Scene() {
           }
         });
       }
+
+      // Update filtered IDs ref so click handler can validate targets
+      const fIds = filteredIdsRef.current;
+      fIds.clear();
+      filteredMembers.forEach((_, id) => fIds.add(id));
 
       // DEBUG: Log slice results on first few frames
       if (Math.floor(time * 10) % 100 === 0 && members.size > 0) {
