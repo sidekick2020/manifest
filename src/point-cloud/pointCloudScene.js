@@ -4421,7 +4421,7 @@
     // exactly where we left off, only fetching members we don't have yet.
 
     const SNAPSHOT_KEY = 'universeSnapshot';
-    const SNAPSHOT_VERSION = 4; // bumped — invalidate old snapshot so profile pictures re-load from API
+    const SNAPSHOT_VERSION = 5; // bumped — invalidate old snapshots missing location fields (region/state/city/country)
     const NAV_CACHE_KEY = 'universeNavCache';   // beam + post caches so restore = no refetch when navigating
     const NAV_CACHE_VERSION = 1;
     const NAV_CACHE_MAX_USERS = 60;            // cap so localStorage doesn't blow up
