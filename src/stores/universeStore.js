@@ -75,6 +75,7 @@ export const useUniverseStore = create((set, get) => {
     performanceMode: false,
     animationEnabled: true,  // Control animation freeze
     zoomToMemberTrigger: null, // Set to member ID to trigger zoom in Scene.jsx
+    locationFilter: { country: '', region: '', city: '' }, // Active location filter
 
     // --- Derived ---
     beamCount: 0,
@@ -272,6 +273,10 @@ export const useUniverseStore = create((set, get) => {
 
     setSelectedPost(id) {
       set({ selectedPost: id });
+    },
+
+    setLocationFilter(filter) {
+      set({ locationFilter: { ...filter }, version: get().version + 1 });
     },
 
     reset() {

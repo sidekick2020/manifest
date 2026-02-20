@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { useUniverseStore } from '../stores/universeStore';
 import { useTrainingStore } from '../stores/trainingStore';
 import { usePredictionStore } from '../stores/predictionStore';
-import { seedToFloat, computeDynamicScale } from '../../lib/codec.js';
+import { seedToFloat, computeDynamicScale, memberMatchesLocationFilter } from '../../lib/codec.js';
 import { v3lerp } from '../../lib/vec3.js';
 import { Octree, getFrustumBounds } from '../../lib/octree.js';
 import { TemporalSlicer } from '../../lib/temporalSlicer.js';
@@ -323,7 +323,7 @@ export function Scene() {
       const store = useUniverseStore.getState();
       const training = useTrainingStore.getState();
       const prediction = usePredictionStore.getState();
-      const { members, posts, comments, targetPos, selectedMember, selectedPost, performanceMode } = store;
+      const { members, posts, comments, targetPos, selectedMember, selectedPost, performanceMode, locationFilter } = store;
 
       // ACTIVITY SPARKLES: Generate sparkles when new comments arrive
       // Only if not in performance mode and dataset is reasonable size
@@ -391,19 +391,36 @@ export function Scene() {
       const slicedMembers = slicer.slice(members, sliceOptions);
       const sliceInfo = slicer.getSliceInfo(members, slicedMembers);
 
+      // LOCATION FILTER: After temporal slice, remove members that don't match
+      // the active location filter. This ensures beams, clicks, posts etc.
+      // only reference members in the filtered set.
+      const hasLocFilter = (locationFilter.country && locationFilter.country.trim()) ||
+                           (locationFilter.region && locationFilter.region.trim()) ||
+                           (locationFilter.city && locationFilter.city.trim());
+      let filteredMembers = slicedMembers;
+      if (hasLocFilter) {
+        filteredMembers = new Map();
+        slicedMembers.forEach((m, id) => {
+          if (memberMatchesLocationFilter(m, locationFilter)) {
+            filteredMembers.set(id, m);
+          }
+        });
+      }
+
       // DEBUG: Log slice results on first few frames
       if (Math.floor(time * 10) % 100 === 0 && members.size > 0) {
         console.log('[Scene] Slice debug:', {
           totalMembers: members.size,
           slicedMembers: slicedMembers.size,
+          filteredMembers: filteredMembers.size,
+          locationFilter: hasLocFilter ? locationFilter : 'none',
           sliceMode: sliceOptions.mode,
           windowSize: sliceOptions.windowSize,
-          hasSlicedMembers: slicedMembers.size > 0
         });
       }
 
-      // OPTIMIZATION: Adaptive throttle based on sliced member count (not total!)
-      const memberCount = slicedMembers.size;
+      // OPTIMIZATION: Adaptive throttle based on visible member count (not total!)
+      const memberCount = filteredMembers.size;
       const tickInterval = memberCount > 1000 ? 66 : (memberCount > 500 ? 50 : 33);
 
       // DYNAMIC GRAVITY: Scale positions based on visible star count.
@@ -413,7 +430,7 @@ export function Scene() {
       // Compute centroid of target positions for visible members
       // (positions are scaled toward this point, keeping clusters centered)
       let centroidX = 0, centroidY = 0, centroidZ = 0, centroidN = 0;
-      slicedMembers.forEach((m, id) => {
+      filteredMembers.forEach((m, id) => {
         const t = targetPos.get(id);
         if (t) { centroidX += t.x; centroidY += t.y; centroidZ += t.z; centroidN++; }
       });
@@ -426,7 +443,7 @@ export function Scene() {
       // Auto-zoom (only when user hasn't manually zoomed)
       // Factors in dynamic gravity: compacted positions need a closer camera
       if (!dragRef.current.active && !cam.userZoomed) {
-        const ideal = 50 + slicedMembers.size * 1.5 * gravityScale;
+        const ideal = 50 + filteredMembers.size * 1.5 * gravityScale;
         cam.td += (ideal - cam.td) * 0.01;
       }
 
@@ -434,11 +451,11 @@ export function Scene() {
       if (now - lastTickTimeRef.current > tickInterval) {
         lastTickTimeRef.current = now;
 
-        // OPTIMIZATION: Only update positions for sliced members (dramatic reduction!)
+        // OPTIMIZATION: Only update positions for filtered members (dramatic reduction!)
         const cullDistance = cam.d * 3;
         const focusPos = cam.focus;
 
-        slicedMembers.forEach((m, id) => {
+        filteredMembers.forEach((m, id) => {
           const target = targetPos.get(id);
           if (!target) return;
 
@@ -485,7 +502,7 @@ export function Scene() {
       const seenB = {};
 
       // OPTIMIZATION: Turn off beams in performance mode or for large datasets
-      const maxBeams = performanceMode ? 0 : (slicedMembers.size > 1000 ? 0 : Math.min(300, slicedMembers.size));
+      const maxBeams = performanceMode ? 0 : (filteredMembers.size > 1000 ? 0 : Math.min(300, filteredMembers.size));
       let beamCount = 0;
 
       if (maxBeams > 0) {
@@ -495,7 +512,7 @@ export function Scene() {
           const k = a < b ? a + '-' + b : b + '-' + a;
           if (seenB[k]) return;
           seenB[k] = 1;
-          const fm = slicedMembers.get(a), tm = slicedMembers.get(b);
+          const fm = filteredMembers.get(a), tm = filteredMembers.get(b);
           if (fm?.position && tm?.position) {
             items.push({ type: 'beam', from: fm.position, to: tm.position, z: (fm.position.z + tm.position.z) / 2, sel: a === selectedMember || b === selectedMember });
             beamCount++;
@@ -516,11 +533,10 @@ export function Scene() {
       // Use sliced members for octree (slice already applied above)
       const octree = octreeRef.current;
 
-      // Build member positions array (from sliced subset only)
-      // Build member positions for octree
+      // Build member positions array (from filtered subset only)
       // Use m.position (visual position) so octree matches what's rendered
       const memberPositions = [];
-      slicedMembers.forEach((m, id) => {
+      filteredMembers.forEach((m, id) => {
         if (m.position) {
           memberPositions.push({ id, position: m.position, mass: m.mass || 1 });
         }
@@ -531,9 +547,11 @@ export function Scene() {
         console.log('[Scene] Temporal slice:', {
           totalMembers: members.size,
           slicedMembers: slicedMembers.size,
+          filteredMembers: filteredMembers.size,
           sliceMode: sliceInfo.mode,
           percentageShown: sliceInfo.percentage + '%',
-          withPositions: memberPositions.length
+          withPositions: memberPositions.length,
+          gravityScale: gravityScale.toFixed(3),
         });
       }
 
@@ -601,7 +619,7 @@ export function Scene() {
 
         // Handle representative tier: top member + count badge
         if (item.type === 'representative') {
-          const m = slicedMembers.get(item.id);
+          const m = filteredMembers.get(item.id);
           if (!m) continue;
           const pos = m.position || item.position;
           const predData = predCache.get(item.id);
@@ -626,7 +644,7 @@ export function Scene() {
 
         // Handle individual members
         const { id, position: pos } = item;
-        const m = slicedMembers.get(id);
+        const m = filteredMembers.get(id);
         if (!m) continue;
 
         const predData = predCache.get(id);
@@ -654,9 +672,9 @@ export function Scene() {
       const lodDistance = cam.d * 2;
 
       // OPTIMIZATION: Turn off posts in performance mode or at scale
-      if (!performanceMode && slicedMembers.size < 1500) {
+      if (!performanceMode && filteredMembers.size < 1500) {
         posts.forEach((post, pid) => {
-          const a = slicedMembers.get(post.creator);
+          const a = filteredMembers.get(post.creator);
           if (!a?.position) return;
 
           // Skip posts from far-away members
@@ -701,17 +719,17 @@ export function Scene() {
       }
 
       // Prediction: risk halos + drift vectors (disabled in performance mode or at scale)
-      if (!performanceMode && prediction.active && prediction.predictions && slicedMembers.size < 1000) {
+      if (!performanceMode && prediction.active && prediction.predictions && filteredMembers.size < 1000) {
         if (prediction.showHalos) {
           prediction.predictions.forEach((pred, id) => {
-            const m = slicedMembers.get(id);
+            const m = filteredMembers.get(id);
             if (!m?.position || pred.riskLevel === 'unknown') return;
             items.push({ type: 'riskHalo', pos: m.position, riskLevel: pred.riskLevel, risk: pred.risk, z: m.position.z - 0.01, mass: m.mass || 1 });
           });
         }
         if (prediction.showDriftVectors) {
           prediction.predictions.forEach((pred, id) => {
-            const m = slicedMembers.get(id);
+            const m = filteredMembers.get(id);
             const target = targetPos.get(id);
             if (!m?.position || !target || pred.riskLevel === 'unknown') return;
             const dx = target.x - m.position.x, dy = target.y - m.position.y, dz = target.z - m.position.z;
@@ -731,13 +749,13 @@ export function Scene() {
             const memberRelapses = new Map();
             sdcMap.forEach((sdc) => {
               if (sdc.setOnDayOne || !sdc.userId) return;
-              const m = slicedMembers.get(sdc.userId);
+              const m = filteredMembers.get(sdc.userId);
               if (!m?.position) return;
               if (!memberRelapses.has(sdc.userId)) memberRelapses.set(sdc.userId, []);
               memberRelapses.get(sdc.userId).push(sdc);
             });
             memberRelapses.forEach((relapses, mid) => {
-              const m = slicedMembers.get(mid);
+              const m = filteredMembers.get(mid);
               if (!m?.position) return;
               const relapseCount = relapses.length;
               // Animate rings: multiple concentric expanding circles
@@ -763,9 +781,9 @@ export function Scene() {
       // Performance monitoring (log every 5 seconds)
       if (Math.floor(time) % 5 === 0 && Math.floor(time * 10) % 10 === 0) {
         const visibleCount = visibleItems ? visibleItems.length : 0;
-        const slicePercent = members.size > 0 ? Math.round((slicedMembers.size / members.size) * 100) : 0;
-        const culledPercent = slicedMembers.size > 0 ? Math.round((1 - visibleCount / slicedMembers.size) * 100) : 0;
-        console.log(`[Scene] Total: ${members.size}, Sliced: ${slicedMembers.size} (${slicePercent}%), Visible: ${visibleCount} (culled ${culledPercent}%)`);
+        const slicePercent = members.size > 0 ? Math.round((filteredMembers.size / members.size) * 100) : 0;
+        const culledPercent = filteredMembers.size > 0 ? Math.round((1 - visibleCount / filteredMembers.size) * 100) : 0;
+        console.log(`[Scene] Total: ${members.size}, Filtered: ${filteredMembers.size} (${slicePercent}%), Visible: ${visibleCount} (culled ${culledPercent}%), gravity: ${gravityScale.toFixed(2)}`);
       }
 
       for (const item of items) {

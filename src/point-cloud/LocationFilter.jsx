@@ -2,6 +2,7 @@
  * Location filter: region, city, country. Hides points that don't match.
  */
 import { useState } from 'react';
+import { useUniverseStore } from '../stores/universeStore';
 
 const COUNTRIES = [
   'Algeria','Argentina','Australia','Austria','Belgium','Belize','Bolivia',
@@ -69,10 +70,13 @@ export function LocationFilter() {
   const [country, setCountry] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
+  const storeSetFilter = useUniverseStore((s) => s.setLocationFilter);
 
   const apply = (c, r, ci) => {
+    const filter = { country: c, region: r, city: ci };
+    storeSetFilter(filter);
     if (typeof window.setLocationFilter === 'function') {
-      window.setLocationFilter({ country: c, region: r, city: ci });
+      window.setLocationFilter(filter);
     }
   };
 
