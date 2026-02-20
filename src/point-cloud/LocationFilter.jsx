@@ -1,21 +1,38 @@
 /**
  * Location filter: region, city, country. Hides points that don't match.
  * Uses window.getLocationFilterOptions() and window.setLocationFilter() from pointCloudScene.
+ * Dropdown options are seeded from a static file (pre-fetched from Back4App) so they
+ * appear immediately, then merged with any dynamically loaded options.
  */
 import { useState, useEffect } from 'react';
+import { STATIC_COUNTRIES, STATIC_REGIONS, STATIC_CITIES } from './locationData.js';
 
-const EMPTY = { countries: [], regions: [], cities: [] };
+const STATIC = {
+  countries: STATIC_COUNTRIES,
+  regions: STATIC_REGIONS,
+  cities: STATIC_CITIES,
+};
+
+/** Merge static + dynamic arrays, deduplicate, sort. */
+function mergeOptions(staticOpts, dynamicOpts) {
+  return {
+    countries: [...new Set([...staticOpts.countries, ...dynamicOpts.countries])].sort(),
+    regions: [...new Set([...staticOpts.regions, ...dynamicOpts.regions])].sort(),
+    cities: [...new Set([...staticOpts.cities, ...dynamicOpts.cities])].sort(),
+  };
+}
 
 export function LocationFilter() {
   const [expanded, setExpanded] = useState(false);
-  const [options, setOptions] = useState(EMPTY);
+  const [options, setOptions] = useState(STATIC);
   const [country, setCountry] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
 
   useEffect(() => {
     if (expanded && typeof window.getLocationFilterOptions === 'function') {
-      setOptions(window.getLocationFilterOptions() || EMPTY);
+      const dynamic = window.getLocationFilterOptions() || { countries: [], regions: [], cities: [] };
+      setOptions(mergeOptions(STATIC, dynamic));
     }
   }, [expanded]);
 
