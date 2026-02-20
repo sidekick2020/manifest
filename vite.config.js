@@ -45,6 +45,9 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+    headers: {
+      'Cache-Control': 'no-store',
+    },
     proxy: {
       '/parse-api': {
         target: 'https://parseapi.back4app.com',

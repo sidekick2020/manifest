@@ -1,6 +1,6 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-    import { getLocationFilterOptions as getCodecLocationOptions, addLocationFromMember } from '../../lib/codec.js';
+    import { getLocationFilterOptions as getCodecLocationOptions, addLocationFromMember, normalizeRegion, isUSState, buildIndexes } from '../../lib/codec.js';
 
     let scene, camera, renderer, points, controls;
     let rotating = false; // Start paused for better UX
@@ -1280,7 +1280,7 @@
         ? `${metadata.sobrietyDays.toLocaleString()} days`
         : (metadata.sobrietyDate || metadata.sobriety ? '< 1 day' : 'Not set'));
 
-      const locationParts = [metadata.city, metadata.region || metadata.state, metadata.country].filter(Boolean).map(s => String(s).trim());
+      const locationParts = [metadata.city, metadata.region || metadata.state, metadata.country].map(s => s ? String(s).trim() : '').filter(Boolean);
       setDetail('detail-location', locationParts.length > 0 ? locationParts.join(', ') : '—');
 
       if (detailEl) detailEl.classList.add('visible');
@@ -4161,7 +4161,8 @@
     /** US country values we accept when filtering by a US state (e.g. Arkansas). Excludes non-US "Arkansas" etc. */
     const US_COUNTRY_VARIANTS = new Set(['', 'us', 'usa', 'united states', 'united states of america']);
 
-    /** Returns true if member/metadata matches current location filter (country, region/state, city). */
+    /** Returns true if member/metadata matches current location filter (country, region/state, city).
+     *  Uses normalizeRegion so "AR" matches "Arkansas" and vice versa. */
     function memberMatchesLocationFilter(meta, f) {
       if (!meta) return false;
       const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
@@ -4170,12 +4171,13 @@
         if (normLoc(meta.country) !== normLoc(f.country)) return false;
       }
       if (f.region && f.region.trim()) {
-        const regionVal = normLoc(f.region);
-        const metaRegion = normLoc(meta.region);
-        const metaState = normLoc(meta.state);
+        const regionVal = normalizeRegion(f.region);
+        const metaRegion = normalizeRegion(meta.region);
+        const metaState = normalizeRegion(meta.state);
         if (metaRegion !== regionVal && metaState !== regionVal) return false;
         // When filtering by a US state (e.g. Arkansas), require country to be US or empty so we don't show "Arkansas, UK" etc.
-        if (regionVal && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
+        // Only apply this check for known US states — non-US regions should not be excluded.
+        if (regionVal && isUSState(regionVal) && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
       }
       if (f.city && f.city.trim()) {
         if (normLoc(meta.city) !== normLoc(f.city)) return false;
@@ -4212,6 +4214,9 @@
       const newVertexIndices = [];
       const newMetadata = [];
 
+      // Precompute post/comment counts once — O(P+C) instead of O(M×(P+C))
+      const indexes = buildIndexes(state);
+
       let nextIndex = points ? points.geometry.attributes.position.count : 0;
 
       state.members.forEach((member, id) => {
@@ -4225,8 +4230,10 @@
           // produces positions that are completely different from the full-universe
           // layout. Overwriting would teleport stars (and their orbiting planets)
           // off-screen mid-session.
-          const postCount = Array.from(state.posts.values()).filter(p => p.creator === id).length;
-          const commentCount = Array.from(state.comments.values()).filter(c => c.fromMember === id).length;
+          const pe = indexes.postsByCreator.get(id);
+          const ce = indexes.commentsByMember.get(id);
+          const postCount = pe ? pe.count : 0;
+          const commentCount = ce ? ce.count : 0;
           const activity = postCount + commentCount;
           const risk = Math.random(); // TODO: Use actual predictions
 
@@ -4277,8 +4284,10 @@
           const pz = p && typeof p.z === 'number' ? p.z : 0;
           newPositions.push(px, py, pz);
 
-          const postCount = Array.from(state.posts.values()).filter(p => p.creator === id).length;
-          const commentCount = Array.from(state.comments.values()).filter(c => c.fromMember === id).length;
+          const pe = indexes.postsByCreator.get(id);
+          const ce = indexes.commentsByMember.get(id);
+          const postCount = pe ? pe.count : 0;
+          const commentCount = ce ? ce.count : 0;
           const activity = postCount + commentCount;
           const risk = Math.random(); // TODO: Use actual predictions
 
@@ -4412,7 +4421,7 @@
     // exactly where we left off, only fetching members we don't have yet.
 
     const SNAPSHOT_KEY = 'universeSnapshot';
-    const SNAPSHOT_VERSION = 4; // bumped — invalidate old snapshot so profile pictures re-load from API
+    const SNAPSHOT_VERSION = 5; // bumped — invalidate old snapshots missing location fields (region/state/city/country)
     const NAV_CACHE_KEY = 'universeNavCache';   // beam + post caches so restore = no refetch when navigating
     const NAV_CACHE_VERSION = 1;
     const NAV_CACHE_MAX_USERS = 60;            // cap so localStorage doesn't blow up
