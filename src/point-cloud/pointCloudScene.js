@@ -218,6 +218,8 @@
         camera = null;
         renderer = null;
         points = null;
+        _pointBufferCapacity = 0;
+        _pointCount = 0;
         controls = null;
       };
     }
@@ -225,6 +227,10 @@
     // Store point metadata for interaction
     let pointMetadata = [];
     let selectedMemberIndex = null;
+
+    // Pre-allocated buffer tracking — avoids O(n) array copy on every member add
+    let _pointBufferCapacity = 0;  // Total allocated member slots in geometry buffers
+    let _pointCount = 0;           // Actually used member slots (visible via setDrawRange)
     // True when page loaded with a user in URL — we show loading screen and do God-view fly-in when ready
     let _initialUrlUserPending = false;
     let _loadingScreenShownAt = 0;
@@ -338,6 +344,21 @@
         float camDist = length(mvPosition.xyz);
         vCamDist = camDist;
 
+        // Compute clip position once (reused for culling + output — saves redundant matrix multiply)
+        vec4 clipPos = projectionMatrix * mvPosition;
+
+        // GPU frustum cull: discard points outside clip volume
+        // Saves fragment shader cost for 80-90% of stars when zoomed into a cluster
+        float w = clipPos.w;
+        float margin = 0.3;
+        if (clipPos.x < -w * (1.0 + margin) || clipPos.x > w * (1.0 + margin) ||
+            clipPos.y < -w * (1.0 + margin) || clipPos.y > w * (1.0 + margin) ||
+            clipPos.z < -w) {
+          gl_PointSize = 0.0;
+          gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+          return;
+        }
+
         // Distance-based LOD
         // Far (250+): larger minimum so stars stay visible and bright from distance
         // Close (30-): boost for detail
@@ -364,7 +385,7 @@
         }
 
         gl_PointSize = finalSize;
-        gl_Position = projectionMatrix * mvPosition;
+        gl_Position = clipPos;
       }
     `;
 
@@ -403,6 +424,57 @@
       }
     `;
 
+    /**
+     * Ensure point geometry buffers have capacity for at least `needed` members.
+     * If not, reallocate with 2× headroom and copy existing data.
+     * This eliminates O(n) copies on every single member add.
+     */
+    function ensurePointCapacity(needed) {
+      if (needed <= _pointBufferCapacity && points && points.geometry) return;
+      const newCap = Math.max(needed * 2, 512);
+      if (!points || !points.geometry) return; // geometry not created yet
+
+      const geo = points.geometry;
+      const oldPosArr = geo.attributes.position?.array;
+
+      const newPos = new Float32Array(newCap * 3);
+      const newCol = new Float32Array(newCap * 3);
+      const newSize = new Float32Array(newCap);
+      const newAct = new Float32Array(newCap);
+      const newIdx = new Float32Array(newCap);
+
+      if (oldPosArr && _pointCount > 0) {
+        newPos.set(oldPosArr.subarray(0, _pointCount * 3));
+        newCol.set(geo.attributes.color.array.subarray(0, _pointCount * 3));
+        newSize.set(geo.attributes.size.array.subarray(0, _pointCount));
+        newAct.set(geo.attributes.activity.array.subarray(0, _pointCount));
+        newIdx.set(geo.attributes.vertexIndex.array.subarray(0, _pointCount));
+      }
+
+      const posAttr = new THREE.BufferAttribute(newPos, 3);
+      posAttr.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('position', posAttr);
+
+      const colAttr = new THREE.BufferAttribute(newCol, 3);
+      colAttr.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('color', colAttr);
+
+      const sizeAttr = new THREE.BufferAttribute(newSize, 1);
+      sizeAttr.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('size', sizeAttr);
+
+      const actAttr = new THREE.BufferAttribute(newAct, 1);
+      actAttr.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('activity', actAttr);
+
+      const idxAttr = new THREE.BufferAttribute(newIdx, 1);
+      idxAttr.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('vertexIndex', idxAttr);
+
+      geo.setDrawRange(0, _pointCount);
+      _pointBufferCapacity = newCap;
+    }
+
     function generatePoints(count) {
       console.time(`generate-${count}`);
 
@@ -416,12 +488,13 @@
       // Clear metadata
       pointMetadata = [];
 
-      // Create buffers
-      const positions = new Float32Array(count * 3);
-      const colors = new Float32Array(count * 3);
-      const sizes = new Float32Array(count);
-      const activities = new Float32Array(count);
-      const vertexIndices = new Float32Array(count);
+      // Create buffers with 2× headroom to avoid reallocations on member add
+      const bufCap = Math.max(count * 2, 512);
+      const positions = new Float32Array(bufCap * 3);
+      const colors = new Float32Array(bufCap * 3);
+      const sizes = new Float32Array(bufCap);
+      const activities = new Float32Array(bufCap);
+      const vertexIndices = new Float32Array(bufCap);
 
       // Generate random spherical distribution (mimics real data)
       for (let i = 0; i < count; i++) {
@@ -490,13 +563,28 @@
         });
       }
 
-      // Create geometry
+      // Create geometry with DynamicDrawUsage for fast partial updates
       const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-      geometry.setAttribute('activity', new THREE.BufferAttribute(activities, 1));
-      geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(vertexIndices, 1));
+      const posAttr = new THREE.BufferAttribute(positions, 3);
+      posAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('position', posAttr);
+      const colAttr = new THREE.BufferAttribute(colors, 3);
+      colAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('color', colAttr);
+      const sizeAttr = new THREE.BufferAttribute(sizes, 1);
+      sizeAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('size', sizeAttr);
+      const actAttr = new THREE.BufferAttribute(activities, 1);
+      actAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('activity', actAttr);
+      const idxAttr = new THREE.BufferAttribute(vertexIndices, 1);
+      idxAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('vertexIndex', idxAttr);
+
+      // Track buffer capacity + visible count
+      _pointBufferCapacity = bufCap;
+      _pointCount = count;
+      geometry.setDrawRange(0, _pointCount);
 
       // Create custom shader material
       const material = new THREE.ShaderMaterial({
@@ -540,15 +628,8 @@
           const prevT = raycaster.params.Line.threshold;
           raycaster.params.Line.threshold = 1.2;
           let hits = [];
-          const batches = activeConnectionLine.batches;
-          if (batches) {
-            for (let i = 0; i < batches.length; i++) {
-              if (batches[i].lineSegments) {
-                hits = hits.concat(raycaster.intersectObject(batches[i].lineSegments));
-              }
-            }
-          } else if (activeConnectionLine.lineSegments) {
-            hits = raycaster.intersectObject(activeConnectionLine.lineSegments);
+          if (_beamLineSegments && _beamLineSegments.visible) {
+            hits = raycaster.intersectObject(_beamLineSegments);
           }
           raycaster.params.Line.threshold = prevT;
           renderer.domElement.style.cursor = hits.length > 0 ? 'pointer' : '';
@@ -600,20 +681,8 @@
         raycaster.params.Line.threshold = 1.2; // generous hit area for thick glow beams
         let bestHit = null;
         let bestTargetIdx = undefined;
-        const batches = activeConnectionLine.batches;
-        if (batches) {
-          for (let b = 0; b < batches.length; b++) {
-            const batch = batches[b];
-            if (!batch.lineSegments) continue;
-            const batchHits = raycaster.intersectObject(batch.lineSegments);
-            if (batchHits.length > 0 && (!bestHit || batchHits[0].distance < bestHit.distance)) {
-              bestHit = batchHits[0];
-              const segIdx = Math.floor(batchHits[0].index / 2);
-              bestTargetIdx = batch.targetIndices[segIdx];
-            }
-          }
-        } else if (activeConnectionLine.lineSegments) {
-          const beamHits = raycaster.intersectObject(activeConnectionLine.lineSegments);
+        if (_beamLineSegments && _beamLineSegments.visible && activeConnectionLine.targetIndices) {
+          const beamHits = raycaster.intersectObject(_beamLineSegments);
           if (beamHits.length > 0) {
             bestHit = beamHits[0];
             const segIdx = Math.floor(beamHits[0].index / 2);
@@ -907,31 +976,30 @@
       const py = typeof pos.y === 'number' ? pos.y : 0;
       const pz = typeof pos.z === 'number' ? pos.z : 0;
 
-      const nextIndex = points.geometry.attributes.position.count;
+      const nextIndex = _pointCount;
       if (nextIndex >= MAX_POINTS_DISPLAYED) return null;
 
+      // Pre-allocated buffer: write in-place (O(1) instead of O(n) copy)
+      ensurePointCapacity(nextIndex + 1);
       const risk = Math.random();
       const color = getRiskColor(risk);
-      const oldPos = points.geometry.attributes.position.array;
-      const oldCol = points.geometry.attributes.color.array;
-      const oldSize = points.geometry.attributes.size.array;
-      const oldAct = points.geometry.attributes.activity.array;
-      const oldIdx = points.geometry.attributes.vertexIndex.array;
-      const newPos = new Float32Array(oldPos.length + 3);
-      const newCol = new Float32Array(oldCol.length + 3);
-      const newSize = new Float32Array(oldSize.length + 1);
-      const newAct = new Float32Array(oldAct.length + 1);
-      const newIdxArr = new Float32Array(oldIdx.length + 1);
-      newPos.set(oldPos); newPos[oldPos.length] = px; newPos[oldPos.length + 1] = py; newPos[oldPos.length + 2] = pz;
-      newCol.set(oldCol); newCol[oldCol.length] = color.r; newCol[oldCol.length + 1] = color.g; newCol[oldCol.length + 2] = color.b;
-      newSize.set(oldSize); newSize[oldSize.length] = sizeFromEngagement(u.TotalComments);
-      newAct.set(oldAct); newAct[oldAct.length] = 0;
-      newIdxArr.set(oldIdx); newIdxArr[oldIdx.length] = nextIndex;
-      points.geometry.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
-      points.geometry.setAttribute('color', new THREE.BufferAttribute(newCol, 3));
-      points.geometry.setAttribute('size', new THREE.BufferAttribute(newSize, 1));
-      points.geometry.setAttribute('activity', new THREE.BufferAttribute(newAct, 1));
-      points.geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(newIdxArr, 1));
+      const posArr = points.geometry.attributes.position.array;
+      const colArr = points.geometry.attributes.color.array;
+      const sizeArr = points.geometry.attributes.size.array;
+      const actArr = points.geometry.attributes.activity.array;
+      const idxArr = points.geometry.attributes.vertexIndex.array;
+      posArr[nextIndex * 3] = px; posArr[nextIndex * 3 + 1] = py; posArr[nextIndex * 3 + 2] = pz;
+      colArr[nextIndex * 3] = color.r; colArr[nextIndex * 3 + 1] = color.g; colArr[nextIndex * 3 + 2] = color.b;
+      sizeArr[nextIndex] = sizeFromEngagement(u.TotalComments);
+      actArr[nextIndex] = 0;
+      idxArr[nextIndex] = nextIndex;
+      _pointCount++;
+      points.geometry.setDrawRange(0, _pointCount);
+      points.geometry.attributes.position.needsUpdate = true;
+      points.geometry.attributes.color.needsUpdate = true;
+      points.geometry.attributes.size.needsUpdate = true;
+      points.geometry.attributes.activity.needsUpdate = true;
+      points.geometry.attributes.vertexIndex.needsUpdate = true;
       const sobrietyIso = u.sobrietyDate?.iso ?? (typeof u.sobrietyDate === 'string' ? u.sobrietyDate : null);
       const sobrietyDays = sobrietyIso ? Math.floor((Date.now() - new Date(sobrietyIso).getTime()) / 86400000) : 0;
       const totalCommentsNum = u.TotalComments != null ? Number(u.TotalComments) : 0;
@@ -2018,62 +2086,50 @@
       const y = r * Math.sin(phi) * Math.sin(theta);
       const z = r * Math.cos(phi);
 
-      // Get current arrays
-      const oldPositions = points.geometry.attributes.position.array;
-      const oldColors = points.geometry.attributes.color.array;
-      const oldSizes = points.geometry.attributes.size.array;
-      const oldActivities = points.geometry.attributes.activity.array;
-      const oldVertexIndices = points.geometry.attributes.vertexIndex.array;
+      // Pre-allocated buffer: ensure capacity then write in-place (O(1) instead of O(n) copy)
+      const newIndex = _pointCount;
+      if (newIndex >= MAX_POINTS_DISPLAYED) return null;
+      ensurePointCapacity(newIndex + 1);
 
-      const newIndex = oldPositions.length / 3;
+      const posArr = points.geometry.attributes.position.array;
+      const colArr = points.geometry.attributes.color.array;
+      const sizeArr = points.geometry.attributes.size.array;
+      const actArr = points.geometry.attributes.activity.array;
+      const idxArr = points.geometry.attributes.vertexIndex.array;
 
-      // Create new larger arrays
-      const newPositions = new Float32Array(oldPositions.length + 3);
-      const newColors = new Float32Array(oldColors.length + 3);
-      const newSizes = new Float32Array(oldSizes.length + 1);
-      const newActivities = new Float32Array(oldActivities.length + 1);
-      const newVertexIndices = new Float32Array(oldVertexIndices.length + 1);
-
-      // Copy old data
-      newPositions.set(oldPositions);
-      newColors.set(oldColors);
-      newSizes.set(oldSizes);
-      newActivities.set(oldActivities);
-      newVertexIndices.set(oldVertexIndices);
-
-      // Add new member
-      newPositions[newIndex * 3] = x;
-      newPositions[newIndex * 3 + 1] = y;
-      newPositions[newIndex * 3 + 2] = z;
+      posArr[newIndex * 3] = x;
+      posArr[newIndex * 3 + 1] = y;
+      posArr[newIndex * 3 + 2] = z;
 
       // Color based on risk
       const risk = member.risk / 100 || 0.5;
       if (risk < 0.33) {
-        newColors[newIndex * 3] = 0;
-        newColors[newIndex * 3 + 1] = risk * 3;
-        newColors[newIndex * 3 + 2] = 1;
+        colArr[newIndex * 3] = 0;
+        colArr[newIndex * 3 + 1] = risk * 3;
+        colArr[newIndex * 3 + 2] = 1;
       } else if (risk < 0.66) {
         const t = (risk - 0.33) * 3;
-        newColors[newIndex * 3] = t;
-        newColors[newIndex * 3 + 1] = 1;
-        newColors[newIndex * 3 + 2] = 1 - t;
+        colArr[newIndex * 3] = t;
+        colArr[newIndex * 3 + 1] = 1;
+        colArr[newIndex * 3 + 2] = 1 - t;
       } else {
         const t = (risk - 0.66) * 3;
-        newColors[newIndex * 3] = 1;
-        newColors[newIndex * 3 + 1] = 1 - t;
-        newColors[newIndex * 3 + 2] = 0;
+        colArr[newIndex * 3] = 1;
+        colArr[newIndex * 3 + 1] = 1 - t;
+        colArr[newIndex * 3 + 2] = 0;
       }
 
-      newSizes[newIndex] = sizeFromEngagement(member.totalComments ?? member.TotalComments, member.activity);
-      newActivities[newIndex] = Math.min(member.activity / 100, 1);
-      newVertexIndices[newIndex] = newIndex;
+      sizeArr[newIndex] = sizeFromEngagement(member.totalComments ?? member.TotalComments, member.activity);
+      actArr[newIndex] = Math.min(member.activity / 100, 1);
+      idxArr[newIndex] = newIndex;
 
-      // Update geometry
-      points.geometry.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
-      points.geometry.setAttribute('color', new THREE.BufferAttribute(newColors, 3));
-      points.geometry.setAttribute('size', new THREE.BufferAttribute(newSizes, 1));
-      points.geometry.setAttribute('activity', new THREE.BufferAttribute(newActivities, 1));
-      points.geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(newVertexIndices, 1));
+      _pointCount++;
+      points.geometry.setDrawRange(0, _pointCount);
+      points.geometry.attributes.position.needsUpdate = true;
+      points.geometry.attributes.color.needsUpdate = true;
+      points.geometry.attributes.size.needsUpdate = true;
+      points.geometry.attributes.activity.needsUpdate = true;
+      points.geometry.attributes.vertexIndex.needsUpdate = true;
 
       // Add to metadata
       pointMetadata.push({
@@ -2256,7 +2312,7 @@
         const hy = posArr[hostIndex * 3 + 1];
         const hz = posArr[hostIndex * 3 + 2];
         let nearestDist = Infinity;
-        const total = points.geometry.attributes.position.count;
+        const total = _pointCount;
         // Sample up to 2000 stars to find nearest — avoid O(N²) on large datasets
         const step = Math.max(1, Math.floor(total / 2000));
         for (let j = 0; j < total; j += step) {
@@ -2892,23 +2948,12 @@
     // Draw glowing connection lines from a user to everyone they've commented to
     function clearActiveConnectionLine() {
       if (activeConnectionLine) {
-        const batches = activeConnectionLine.batches;
-        if (batches) {
-          batches.forEach((b) => {
-            (b.allSegments || []).forEach((ls) => {
-              scene.remove(ls);
-              if (ls.geometry) ls.geometry.dispose();
-              // Do not dispose material — beams share beamLayerMaterials
-            });
-          });
-        } else {
-          (activeConnectionLine.allSegments || []).forEach((ls) => {
-            scene.remove(ls);
-            if (ls.geometry) ls.geometry.dispose();
-          });
-        }
         activeConnectionLine = null;
       }
+      // Reset shared beam buffer — geometry is reused, not disposed
+      _beamSegmentCount = 0;
+      if (_beamGeometry) _beamGeometry.setDrawRange(0, 0);
+      if (_beamLineSegments) _beamLineSegments.visible = false;
     }
 
     // In-memory cache: loaded comment/engagement data per user so we don't re-fetch. Also used to train codec.
@@ -3103,11 +3148,16 @@
       }
     }
 
-    // Shared beam materials (3 layers) — created once, uniforms updated once per frame for performance
-    let beamLayerMaterials = null;
+    // Single unified beam material — composites all 3 glow layers in one fragment pass (1 draw call instead of 3)
+    let beamLayerMaterials = null; // kept as array-of-one for compat with uniform update code
+    let _beamMaterial = null;
+    let _beamGeometry = null;
+    let _beamLineSegments = null;
+    let _beamBufferCapacity = 0;
+    let _beamSegmentCount = 0;
 
-    function getBeamLayerMaterials() {
-      if (beamLayerMaterials) return beamLayerMaterials;
+    function getBeamMaterial() {
+      if (_beamMaterial) return _beamMaterial;
       const beamVert = `
         attribute float aStrength;
         varying float vLineDist;
@@ -3118,33 +3168,34 @@
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `;
+      // Single-pass fragment: composites all 3 glow layers (outer, middle, core) in one draw call
       const beamFrag = `
         uniform float time;
         uniform float fadeIn;
-        uniform float baseAlpha;
-        uniform float colScale;
         varying float vLineDist;
         varying float vStrength;
         void main() {
           float pulse = sin(vLineDist * 6.0 - time * 1.2) * 0.5 + 0.5;
           float thickMult = 1.0 + vStrength * 1.5;
-          float alpha = (0.55 + pulse * 0.18) * baseAlpha * thickMult * fadeIn;
-          vec3 col = mix(vec3(0.62, 0.45, 1.0), vec3(0.78, 0.65, 1.0), pulse * 0.5) * colScale;
-          col = mix(col, vec3(0.90, 0.80, 1.0), vStrength * 0.4);
-          gl_FragColor = vec4(col, alpha);
+          vec3 finalCol = vec3(0.0);
+          float finalAlpha = 0.0;
+          // Layer 0: faint outer (0.12, 0.65), Layer 1: middle (0.30, 0.82), Layer 2: core (0.90, 1.0)
+          float baseAlphas[3] = float[](0.12, 0.30, 0.90);
+          float colScales[3] = float[](0.65, 0.82, 1.0);
+          for (int i = 0; i < 3; i++) {
+            float a = (0.55 + pulse * 0.18) * baseAlphas[i] * thickMult * fadeIn;
+            vec3 c = mix(vec3(0.62, 0.45, 1.0), vec3(0.78, 0.65, 1.0), pulse * 0.5) * colScales[i];
+            c = mix(c, vec3(0.90, 0.80, 1.0), vStrength * 0.4);
+            finalCol += c * a;
+            finalAlpha += a;
+          }
+          gl_FragColor = vec4(finalCol, clamp(finalAlpha, 0.0, 1.0));
         }
       `;
-      const layers = [
-        { baseAlpha: 0.12, colScale: 0.65 },
-        { baseAlpha: 0.30, colScale: 0.82 },
-        { baseAlpha: 0.90, colScale: 1.00 },
-      ];
-      beamLayerMaterials = layers.map(({ baseAlpha, colScale }) => new THREE.ShaderMaterial({
+      _beamMaterial = new THREE.ShaderMaterial({
         uniforms: {
           time: { value: 0 },
           fadeIn: { value: 0 },
-          baseAlpha: { value: baseAlpha },
-          colScale: { value: colScale },
         },
         vertexShader: beamVert,
         fragmentShader: beamFrag,
@@ -3152,43 +3203,71 @@
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         depthTest: false,
-      }));
-      return beamLayerMaterials;
+      });
+      // Keep beamLayerMaterials as array-of-one so uniform update code works unchanged
+      beamLayerMaterials = [_beamMaterial];
+      return _beamMaterial;
     }
 
-    /** Create one batch of beam segments (3 layers) and add to scene. Returns { lineSegments, allSegments, targetIndices }. */
+    /** Ensure shared beam geometry has capacity for `needed` segments. */
+    function ensureBeamCapacity(needed) {
+      if (needed <= _beamBufferCapacity && _beamGeometry) return;
+      const newCap = Math.max(needed * 2, 128);
+      const newPos = new Float32Array(newCap * 6);
+      const newStr = new Float32Array(newCap * 2);
+      if (_beamGeometry && _beamSegmentCount > 0) {
+        const oldPos = _beamGeometry.attributes.position.array;
+        const oldStr = _beamGeometry.attributes.aStrength.array;
+        newPos.set(oldPos.subarray(0, _beamSegmentCount * 6));
+        newStr.set(oldStr.subarray(0, _beamSegmentCount * 2));
+      }
+      if (!_beamGeometry) {
+        _beamGeometry = new THREE.BufferGeometry();
+      }
+      const posAttr = new THREE.BufferAttribute(newPos, 3);
+      posAttr.setUsage(THREE.DynamicDrawUsage);
+      _beamGeometry.setAttribute('position', posAttr);
+      _beamGeometry.setAttribute('aStrength', new THREE.BufferAttribute(newStr, 1));
+      _beamGeometry.setDrawRange(0, _beamSegmentCount * 2);
+      _beamBufferCapacity = newCap;
+
+      // Create LineSegments once, reuse forever
+      if (!_beamLineSegments) {
+        const mat = getBeamMaterial();
+        _beamLineSegments = new THREE.LineSegments(_beamGeometry, mat);
+        scene.add(_beamLineSegments);
+      } else {
+        _beamLineSegments.geometry = _beamGeometry;
+      }
+    }
+
+    /** Write beam segments into the shared buffer. Returns { targetIndices }. */
     function addOneBeamBatch(sourceIndex, targetPairsBatch, maxCountForStrength, beamStartTime) {
       if (targetPairsBatch.length === 0) return null;
-      const vertBuf = new Float32Array(targetPairsBatch.length * 6);
-      const strengthArr = new Float32Array(targetPairsBatch.length * 2);
+      const count = targetPairsBatch.length;
+      ensureBeamCapacity(_beamSegmentCount + count);
+      const posArr = _beamGeometry.attributes.position.array;
+      const strArr = _beamGeometry.attributes.aStrength.array;
       const maxCount = Math.max(maxCountForStrength, 1);
-      targetPairsBatch.forEach(({ count }, i) => {
-        const s = Math.log(1 + count) / Math.log(1 + maxCount);
-        strengthArr[i * 2] = s;
-        strengthArr[i * 2 + 1] = s;
-      });
-      const lineGeo = new THREE.BufferGeometry();
-      lineGeo.setAttribute('position', new THREE.BufferAttribute(vertBuf, 3));
-      lineGeo.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
-      lineGeo.setAttribute('aStrength', new THREE.BufferAttribute(strengthArr, 1));
-      const materials = getBeamLayerMaterials();
-      const allSegments = [];
-      let lineSegments = null;
-      materials.forEach((mat, layerIdx) => {
-        const geo = layerIdx === 0 ? lineGeo : (() => {
-          const g = new THREE.BufferGeometry();
-          g.setAttribute('position', new THREE.BufferAttribute(vertBuf, 3));
-          g.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
-          g.setAttribute('aStrength', new THREE.BufferAttribute(strengthArr.slice(), 1));
-          return g;
-        })();
-        const ls = new THREE.LineSegments(geo, mat);
-        scene.add(ls);
-        allSegments.push(ls);
-        if (layerIdx === materials.length - 1) lineSegments = ls;
-      });
-      const targetIndices = targetPairsBatch.map((p) => p.idx);
-      return { lineSegments, allSegments, targetIndices, lineGeo, vertBuf };
+      const targetIndices = [];
+      for (let i = 0; i < count; i++) {
+        const { idx, count: pairCount } = targetPairsBatch[i];
+        const s = Math.log(1 + pairCount) / Math.log(1 + maxCount);
+        const off = (_beamSegmentCount + i) * 6;
+        const sOff = (_beamSegmentCount + i) * 2;
+        // Positions will be filled by updateConnectionLinePositions; just set strength
+        posArr[off] = 0; posArr[off+1] = 0; posArr[off+2] = 0;
+        posArr[off+3] = 0; posArr[off+4] = 0; posArr[off+5] = 0;
+        strArr[sOff] = s;
+        strArr[sOff + 1] = s;
+        targetIndices.push(idx);
+      }
+      _beamSegmentCount += count;
+      _beamGeometry.setDrawRange(0, _beamSegmentCount * 2);
+      _beamGeometry.attributes.position.needsUpdate = true;
+      _beamGeometry.attributes.aStrength.needsUpdate = true;
+      if (_beamLineSegments) _beamLineSegments.visible = true;
+      return { targetIndices };
     }
 
     // Helper: fill a supporter card bg element with a profile image (or leave initials)
@@ -3493,10 +3572,10 @@
               const batch = addOneBeamBatch(sourceIndex, toDraw, maxCountSoFar, beamStartTime);
               if (batch) {
                 if (!activeConnectionLine) {
-                  activeConnectionLine = { sourceIndex, beamStartTime, batches: [] };
+                  activeConnectionLine = { sourceIndex, beamStartTime, targetIndices: [] };
                 }
-                activeConnectionLine.batches.push(batch);
-                updateConnectionLinePositions(); // merges when batches.length > 1
+                activeConnectionLine.targetIndices.push(...batch.targetIndices);
+                updateConnectionLinePositions();
               }
             }
           }
@@ -3542,17 +3621,16 @@
         const targetPairsToDraw = targetPairs.slice(0, segmentCap);
         const maxCount = Math.max(...targetPairsToDraw.map((p) => p.count), 1);
         if (targetPairsToDraw.length > 0 && !stale()) {
-          const haveBeamsAlready = activeConnectionLine && activeConnectionLine.batches && activeConnectionLine.batches.length > 0;
+          const haveBeamsAlready = activeConnectionLine && activeConnectionLine.targetIndices && activeConnectionLine.targetIndices.length > 0;
           if (useCache || !haveBeamsAlready) {
             clearActiveConnectionLine();
             const beamStartTime = performance.now();
             const batch = addOneBeamBatch(sourceIndex, targetPairsToDraw, maxCount, beamStartTime);
             if (batch) {
-              activeConnectionLine = { sourceIndex, beamStartTime, batches: [batch] };
+              activeConnectionLine = { sourceIndex, beamStartTime, targetIndices: batch.targetIndices };
               updateConnectionLinePositions();
             }
           }
-          // uncached with beams already: we added incrementally in the loop; merge already happened in updateConnectionLinePositions
         }
 
         // Cache for next time and for codec (so it doesn't have to load again)
@@ -3575,85 +3653,12 @@
       }
     }
 
-    /** Merge multiple beam batches into one (3 LineSegments total) to reduce draw calls. */
-    function mergeBeamBatches() {
-      if (!activeConnectionLine || !points) return;
-      const batches = activeConnectionLine.batches;
-      if (!batches || batches.length <= 1) return;
-      const posArr = points.geometry.attributes.position.array;
-      const sourceIndex = activeConnectionLine.sourceIndex;
-      const sx = posArr[sourceIndex * 3];
-      const sy = posArr[sourceIndex * 3 + 1];
-      const sz = posArr[sourceIndex * 3 + 2];
-
-      const mergedTargetIndices = batches.flatMap((b) => b.targetIndices);
-      const totalSegments = mergedTargetIndices.length;
-      const mergedPos = new Float32Array(totalSegments * 6);
-      const mergedStrength = new Float32Array(totalSegments * 2);
-      let strengthOffset = 0;
-      for (let b = 0; b < batches.length; b++) {
-        const batch = batches[b];
-        const geom = batch.lineSegments && batch.lineSegments.geometry;
-        if (geom && geom.attributes && geom.attributes.aStrength) {
-          const arr = geom.attributes.aStrength.array;
-          mergedStrength.set(arr, strengthOffset);
-          strengthOffset += arr.length;
-        }
-      }
-      for (let i = 0; i < mergedTargetIndices.length; i++) {
-        const ti = mergedTargetIndices[i];
-        const o = i * 6;
-        mergedPos[o]     = sx; mergedPos[o + 1] = sy; mergedPos[o + 2] = sz;
-        mergedPos[o + 3] = posArr[ti * 3];
-        mergedPos[o + 4] = posArr[ti * 3 + 1];
-        mergedPos[o + 5] = posArr[ti * 3 + 2];
-      }
-
-      const lineGeo = new THREE.BufferGeometry();
-      lineGeo.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
-      lineGeo.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
-      lineGeo.setAttribute('aStrength', new THREE.BufferAttribute(mergedStrength, 1));
-      const materials = getBeamLayerMaterials();
-      const allSegments = [];
-      let lineSegments = null;
-      materials.forEach((mat, layerIdx) => {
-        const geo = layerIdx === 0 ? lineGeo : (() => {
-          const g = new THREE.BufferGeometry();
-          g.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
-          g.getAttribute('position').setUsage(THREE.DynamicDrawUsage);
-          g.setAttribute('aStrength', new THREE.BufferAttribute(mergedStrength.slice(), 1));
-          return g;
-        })();
-        const ls = new THREE.LineSegments(geo, mat);
-        scene.add(ls);
-        allSegments.push(ls);
-        if (layerIdx === materials.length - 1) lineSegments = ls;
-      });
-
-      batches.forEach((batch) => {
-        (batch.allSegments || []).forEach((ls) => {
-          scene.remove(ls);
-          if (ls.geometry) ls.geometry.dispose();
-        });
-      });
-      activeConnectionLine.batches = [{
-        lineSegments,
-        allSegments,
-        targetIndices: mergedTargetIndices,
-        lineGeo,
-        vertBuf: mergedPos,
-      }];
-    }
-
     // Called every frame in animate() to keep lines glued to moving stars (throttled when many beams)
     function updateConnectionLinePositions() {
-      if (!activeConnectionLine || !points) return;
-      let batches = activeConnectionLine.batches;
-      if (!batches || batches.length === 0) return;
-      if (batches.length > 1) {
-        mergeBeamBatches();
-        batches = activeConnectionLine.batches;
-      }
+      if (!activeConnectionLine || !points || !_beamGeometry) return;
+      const targetIndices = activeConnectionLine.targetIndices;
+      if (!targetIndices || targetIndices.length === 0) return;
+
       const posArr = points.geometry.attributes.position.array;
       const sourceIndex = activeConnectionLine.sourceIndex;
       const beamStartTime = activeConnectionLine.beamStartTime;
@@ -3664,12 +3669,11 @@
       const t = performance.now() / 1000;
 
       // Dynamic beam LOD: draw more segments when FPS is strong, fewer when weak
-      const builtCount = batches[0] && batches[0].targetIndices ? batches[0].targetIndices.length : 0;
       const dynamicCap = getBeamSegmentCapForFps(fpsSmoothed);
-      const drawCount = Math.min(builtCount, dynamicCap);
+      const drawCount = Math.min(targetIndices.length, dynamicCap);
       const drawVertices = drawCount * 2;
 
-      // Update shared beam materials once per frame (all batches use the same 3 materials)
+      // Update shared beam material uniforms (single material now)
       // Pause beam pulse animation while user is navigating to keep FPS up
       if (beamLayerMaterials) {
         beamLayerMaterials.forEach((mat) => {
@@ -3680,27 +3684,18 @@
         });
       }
 
-      for (let b = 0; b < batches.length; b++) {
-        const { lineSegments, allSegments, targetIndices } = batches[b];
-        if (!lineSegments || !lineSegments.geometry || !allSegments) continue;
-        const buf = lineSegments.geometry.attributes.position.array;
-        for (let i = 0; i < targetIndices.length; i++) {
-          const ti = targetIndices[i];
-          const o = i * 6;
-          buf[o]     = sx; buf[o + 1] = sy; buf[o + 2] = sz;
-          buf[o + 3] = posArr[ti * 3];
-          buf[o + 4] = posArr[ti * 3 + 1];
-          buf[o + 5] = posArr[ti * 3 + 2];
-        }
-        allSegments.forEach(ls => {
-          if (ls && ls.geometry) {
-            if (ls.geometry.attributes && ls.geometry.attributes.position) {
-              ls.geometry.attributes.position.needsUpdate = true;
-            }
-            ls.geometry.setDrawRange(0, drawVertices);
-          }
-        });
+      // Write source→target positions into the shared beam buffer
+      const buf = _beamGeometry.attributes.position.array;
+      for (let i = 0; i < targetIndices.length; i++) {
+        const ti = targetIndices[i];
+        const o = i * 6;
+        buf[o]     = sx; buf[o + 1] = sy; buf[o + 2] = sz;
+        buf[o + 3] = posArr[ti * 3];
+        buf[o + 4] = posArr[ti * 3 + 1];
+        buf[o + 5] = posArr[ti * 3 + 2];
       }
+      _beamGeometry.attributes.position.needsUpdate = true;
+      _beamGeometry.setDrawRange(0, drawVertices);
     }
 
     // Kept for the clear-connections button; also clears active line
@@ -3761,11 +3756,7 @@
 
       // Don't render or update beams/planets only during travel (fly-to), not during rotate
       const beamsVisible = !_isTraveling;
-      if (activeConnectionLine && activeConnectionLine.batches) {
-        activeConnectionLine.batches.forEach((b) => {
-          (b.allSegments || []).forEach((ls) => { if (ls) ls.visible = beamsVisible; });
-        });
-      }
+      if (_beamLineSegments) _beamLineSegments.visible = beamsVisible && _beamSegmentCount > 0;
       if (orbitingPosts) orbitingPosts.visible = beamsVisible;
 
       // Animate orbiting post-planets — skip only during travel (fly-to)
@@ -3827,8 +3818,8 @@
 
       // Update connection lines — LOD throttle by beam count for FPS (fewer updates when many beams)
       if (doHeavyUpdate && !_isTraveling) {
-        const beamCount = activeConnectionLine && activeConnectionLine.batches && activeConnectionLine.batches[0]
-          ? activeConnectionLine.batches[0].targetIndices.length : 0;
+        const beamCount = activeConnectionLine && activeConnectionLine.targetIndices
+          ? activeConnectionLine.targetIndices.length : 0;
         let beamInterval = 1;
         if (panelOpen) beamInterval = 8;
         else if (beamCount > 44) beamInterval = 4;
@@ -4064,7 +4055,7 @@
         memberIndexMap.clear();
         usernameToIndexMap.clear();
 
-        // Remove all points
+        // Remove all points and reset buffer tracking
         if (points) {
           scene.remove(points);
           points.geometry.dispose();
@@ -4072,6 +4063,8 @@
           points = null;
         }
         pointMetadata = [];
+        _pointBufferCapacity = 0;
+        _pointCount = 0;
 
         // Reset stats
         document.getElementById('admin-total').textContent = '0';
@@ -4106,14 +4099,9 @@
 
     // Helper function to enrich point cloud data incrementally
     function enrichPointCloudData(state) {
-      const newPositions = [];
-      const newColors = [];
-      const newSizes = [];
-      const newActivities = [];
-      const newVertexIndices = [];
       const newMetadata = [];
 
-      let nextIndex = points ? points.geometry.attributes.position.count : 0;
+      let nextIndex = _pointCount;
 
       state.members.forEach((member, id) => {
         const existingIndex = memberIndexMap.get(id);
@@ -4165,24 +4153,37 @@
           };
         } else {
           if (nextIndex >= MAX_POINTS_DISPLAYED) return; // FPS cap: don't add more points
-          // APPEND new member (member.position can be null from back4app feed)
+          // APPEND new member — write directly into pre-allocated buffer (O(1))
           const p = member.position;
           const px = p && typeof p.x === 'number' ? p.x : 0;
           const py = p && typeof p.y === 'number' ? p.y : 0;
           const pz = p && typeof p.z === 'number' ? p.z : 0;
-          newPositions.push(px, py, pz);
 
           const postCount = Array.from(state.posts.values()).filter(p => p.creator === id).length;
           const commentCount = Array.from(state.comments.values()).filter(c => c.fromMember === id).length;
           const activity = postCount + commentCount;
           const risk = Math.random(); // TODO: Use actual predictions
 
-          const color = getRiskColor(risk);
-          newColors.push(color.r, color.g, color.b);
+          // Ensure capacity and write in-place (O(1) instead of O(n) copy)
+          if (points && points.geometry) {
+            ensurePointCapacity(nextIndex + 1);
+            const posArr = points.geometry.attributes.position.array;
+            const colArr = points.geometry.attributes.color.array;
+            const sizeArr = points.geometry.attributes.size.array;
+            const actArr = points.geometry.attributes.activity.array;
+            const idxArr = points.geometry.attributes.vertexIndex.array;
 
-          newSizes.push(sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount));
-          newActivities.push(Math.min(activity / 100, 1));
-          newVertexIndices.push(nextIndex);
+            const color = getRiskColor(risk);
+            posArr[nextIndex * 3] = px;
+            posArr[nextIndex * 3 + 1] = py;
+            posArr[nextIndex * 3 + 2] = pz;
+            colArr[nextIndex * 3] = color.r;
+            colArr[nextIndex * 3 + 1] = color.g;
+            colArr[nextIndex * 3 + 2] = color.b;
+            sizeArr[nextIndex] = sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount);
+            actArr[nextIndex] = Math.min(activity / 100, 1);
+            idxArr[nextIndex] = nextIndex;
+          }
 
           newMetadata.push({
             id,
@@ -4205,72 +4206,17 @@
         }
       });
 
-      // If there are new members, expand geometry
-      if (newPositions.length > 0) {
-        if (points && points.geometry) {
-          // Expand existing geometry
-          const oldPositions = points.geometry.attributes.position.array;
-          const oldColors = points.geometry.attributes.color.array;
-          const oldSizes = points.geometry.attributes.size.array;
-          const oldActivities = points.geometry.attributes.activity.array;
-          const oldVertexIndices = points.geometry.attributes.vertexIndex.array;
-
-          const newPosArray = new Float32Array(oldPositions.length + newPositions.length);
-          const newColArray = new Float32Array(oldColors.length + newColors.length);
-          const newSizeArray = new Float32Array(oldSizes.length + newSizes.length);
-          const newActArray = new Float32Array(oldActivities.length + newActivities.length);
-          const newIdxArray = new Float32Array(oldVertexIndices.length + newVertexIndices.length);
-
-          newPosArray.set(oldPositions);
-          newPosArray.set(newPositions, oldPositions.length);
-
-          newColArray.set(oldColors);
-          newColArray.set(newColors, oldColors.length);
-
-          newSizeArray.set(oldSizes);
-          newSizeArray.set(newSizes, oldSizes.length);
-
-          newActArray.set(oldActivities);
-          newActArray.set(newActivities, oldActivities.length);
-
-          newIdxArray.set(oldVertexIndices);
-          newIdxArray.set(newVertexIndices, oldVertexIndices.length);
-
-          // Update geometry
-          points.geometry.setAttribute('position', new THREE.BufferAttribute(newPosArray, 3));
-          points.geometry.setAttribute('color', new THREE.BufferAttribute(newColArray, 3));
-          points.geometry.setAttribute('size', new THREE.BufferAttribute(newSizeArray, 1));
-          points.geometry.setAttribute('activity', new THREE.BufferAttribute(newActArray, 1));
-          points.geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(newIdxArray, 1));
-
-          // Append metadata
-          pointMetadata.push(...newMetadata);
-        } else {
-          // Create new geometry (first load)
-          const geometry = new THREE.BufferGeometry();
-          geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPositions), 3));
-          geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(newColors), 3));
-          geometry.setAttribute('size', new THREE.BufferAttribute(new Float32Array(newSizes), 1));
-          geometry.setAttribute('activity', new THREE.BufferAttribute(new Float32Array(newActivities), 1));
-          geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(new Float32Array(newVertexIndices), 1));
-
-          const material = new THREE.ShaderMaterial({
-            vertexShader: starVertexShader,
-            fragmentShader: starFragmentShader,
-            uniforms: {
-              time: { value: 0 },
-              selectedIndex: { value: -1.0 }
-            },
-            transparent: true,
-            depthWrite: false,
-            blending: THREE.NormalBlending, // Changed from AdditiveBlending to prevent white ball effect
-          });
-
-          points = new THREE.Points(geometry, material);
-          scene.add(points);
-
-          pointMetadata = newMetadata;
+      // New members were written in-place above; update draw range + metadata
+      if (newMetadata.length > 0) {
+        if (!points || !points.geometry) {
+          // First load — need to create geometry from scratch via generatePoints path
+          // This shouldn't normally happen since restoreFromSnapshot or startLoadRealDataJob
+          // create the initial geometry. If it does, fall back to generatePoints(0).
+          generatePoints(0);
         }
+        _pointCount = nextIndex;
+        points.geometry.setDrawRange(0, _pointCount);
+        pointMetadata.push(...newMetadata);
 
         // Mark attributes as needing update
         points.geometry.attributes.position.needsUpdate = true;
@@ -4438,11 +4384,13 @@
 
       const toShow = members.slice(0, MAX_POINTS_DISPLAYED);
       const n = toShow.length;
-      const positions   = new Float32Array(n * 3);
-      const colors      = new Float32Array(n * 3);
-      const sizes       = new Float32Array(n);
-      const activities  = new Float32Array(n);
-      const vertexIdxs  = new Float32Array(n);
+      // Allocate with 1.5× headroom so incremental adds don't need reallocation
+      const bufCap = Math.max(Math.ceil(n * 1.5), 512);
+      const positions   = new Float32Array(bufCap * 3);
+      const colors      = new Float32Array(bufCap * 3);
+      const sizes       = new Float32Array(bufCap);
+      const activities  = new Float32Array(bufCap);
+      const vertexIdxs  = new Float32Array(bufCap);
 
       // Support both top-level x,y,z and nested position: { x, y, z } (old snapshot format)
       function getCoord(m, axis) {
@@ -4490,13 +4438,28 @@
       });
 
       syncUsernameToIndexMap();
-      // Build geometry + material
+      // Build geometry + material with DynamicDrawUsage for fast partial updates
       const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position',    new THREE.BufferAttribute(positions,  3));
-      geometry.setAttribute('color',       new THREE.BufferAttribute(colors,     3));
-      geometry.setAttribute('size',        new THREE.BufferAttribute(sizes,      1));
-      geometry.setAttribute('activity',    new THREE.BufferAttribute(activities, 1));
-      geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(vertexIdxs, 1));
+      const posAttr = new THREE.BufferAttribute(positions, 3);
+      posAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('position', posAttr);
+      const colAttr = new THREE.BufferAttribute(colors, 3);
+      colAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('color', colAttr);
+      const sizeAttr = new THREE.BufferAttribute(sizes, 1);
+      sizeAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('size', sizeAttr);
+      const actAttr = new THREE.BufferAttribute(activities, 1);
+      actAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('activity', actAttr);
+      const idxAttr = new THREE.BufferAttribute(vertexIdxs, 1);
+      idxAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('vertexIndex', idxAttr);
+
+      // Track buffer capacity + visible count
+      _pointBufferCapacity = bufCap;
+      _pointCount = n;
+      geometry.setDrawRange(0, _pointCount);
 
       const material = new THREE.ShaderMaterial({
         vertexShader:   starVertexShader,
