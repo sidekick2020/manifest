@@ -419,6 +419,13 @@ export function Scene() {
         });
       }
 
+      // Clear selection if the selected member is not in the filtered set
+      // (prevents stale beams/labels from a pre-filter selection)
+      if (hasLocFilter && selectedMember && !filteredMembers.has(selectedMember)) {
+        store.setSelectedMember(null, { zoom: false });
+        store.setSelectedPost(null);
+      }
+
       // OPTIMIZATION: Adaptive throttle based on visible member count (not total!)
       const memberCount = filteredMembers.size;
       const tickInterval = memberCount > 1000 ? 66 : (memberCount > 500 ? 50 : 33);
@@ -556,11 +563,11 @@ export function Scene() {
       }
 
       // Rebuild octree periodically (not every frame - too expensive)
-      // Also rebuild when new members are added during initial load
+      // Also rebuild when members are added or removed (e.g. location filter applied)
       const octreeStats = octree.getStats();
       const shouldRebuild =
         octreeStats.memberCount === 0 || // First time
-        octreeStats.memberCount < memberPositions.length || // Members added
+        octreeStats.memberCount !== memberPositions.length || // Members added or removed (filter change)
         Math.floor(time * 10) % 30 === 0; // Periodic update
 
       if (shouldRebuild && memberPositions.length > 0) {
@@ -800,17 +807,19 @@ export function Scene() {
           }
         } else if (item.type === 'aggregate') {
           // LOD: Render aggregated clusters
+          // Filter aggregate memberIds to only include filtered members
+          const validIds = item.memberIds ? item.memberIds.filter(id => filteredMembers.has(id)) : [];
+          if (validIds.length === 0) continue; // Skip aggregate if no filtered members
+
           const p = project(item.pos, camTransform);
           if (p.s > 0 && p.z > -100) {
-            const size = 3 + Math.sqrt(item.count) * 2;
+            const size = 3 + Math.sqrt(validIds.length) * 2;
             const radius = size * p.s;
 
             // CRITICAL: Make aggregates clickable by adding to screenPosRef
-            // Use first member ID from the aggregate as representative
-            if (item.memberIds && item.memberIds.length > 0) {
-              const representativeId = 'aggregate:' + item.memberIds[0];
-              screenPosRef.current.set(representativeId, { x: p.x, y: p.y, memberIds: item.memberIds, aggPos: item.pos });
-            }
+            // Use first filtered member ID from the aggregate as representative
+            const representativeId = 'aggregate:' + validIds[0];
+            screenPosRef.current.set(representativeId, { x: p.x, y: p.y, memberIds: validIds, aggPos: item.pos });
 
             // Blue cluster color — fade in with blendFactor during LOD transition
             const aggAlpha = item.opacity * (0.4 + (item.blendFactor || 0) * 0.2);
@@ -820,12 +829,12 @@ export function Scene() {
             ctx.fill();
 
             // Label with count if big enough
-            if (item.count > 5 && radius > 8) {
+            if (validIds.length > 5 && radius > 8) {
               ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
               ctx.font = `${Math.floor(size * 0.8)}px sans-serif`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText(item.count.toString(), p.x, p.y);
+              ctx.fillText(validIds.length.toString(), p.x, p.y);
             }
           }
         } else if (item.type === 'representative') {

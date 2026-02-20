@@ -88,9 +88,7 @@ export function LocationFilter() {
     setCountry('');
     setRegion('');
     setCity('');
-    if (typeof window.setLocationFilter === 'function') {
-      window.setLocationFilter({ country: '', region: '', city: '' });
-    }
+    apply('', '', '');
   };
 
   const hasFilter = country || region || city;
