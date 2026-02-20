@@ -4,7 +4,7 @@
  * Dropdown options are seeded from static data (pre-fetched from Back4App) so they
  * appear immediately, then merged with any dynamically loaded options.
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 /** Static location data pre-fetched from Back4App (10k members sampled, deduplicated). */
 const STATIC_COUNTRIES = [
@@ -142,17 +142,16 @@ function mergeOptions(staticOpts, dynamicOpts) {
 
 export function LocationFilter() {
   const [expanded, setExpanded] = useState(false);
-  const [options, setOptions] = useState(STATIC);
   const [country, setCountry] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
 
-  useEffect(() => {
-    if (expanded && typeof window.getLocationFilterOptions === 'function') {
-      const dynamic = window.getLocationFilterOptions() || { countries: [], regions: [], cities: [] };
-      setOptions(mergeOptions(STATIC, dynamic));
-    }
-  }, [expanded]);
+  // Compute options on every render: static data is always available,
+  // dynamic data merges in once the scene has loaded location info.
+  const dynamic = (typeof window.getLocationFilterOptions === 'function')
+    ? (window.getLocationFilterOptions() || { countries: [], regions: [], cities: [] })
+    : { countries: [], regions: [], cities: [] };
+  const options = mergeOptions(STATIC, dynamic);
 
   const apply = (c, r, ci) => {
     if (typeof window.setLocationFilter === 'function') {
