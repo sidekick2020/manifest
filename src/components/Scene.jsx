@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { useUniverseStore } from '../stores/universeStore';
 import { useTrainingStore } from '../stores/trainingStore';
 import { usePredictionStore } from '../stores/predictionStore';
-import { seedToFloat } from '../../lib/codec.js';
+import { seedToFloat, computeDynamicScale } from '../../lib/codec.js';
 import { v3lerp } from '../../lib/vec3.js';
 import { Octree, getFrustumBounds } from '../../lib/octree.js';
 import { TemporalSlicer } from '../../lib/temporalSlicer.js';
@@ -402,15 +402,33 @@ export function Scene() {
         });
       }
 
-      // Auto-zoom (only when user hasn't manually zoomed)
-      if (!dragRef.current.active && !cam.userZoomed) {
-        const ideal = 50 + slicedMembers.size * 1.5;
-        cam.td += (ideal - cam.td) * 0.01;
-      }
-
       // OPTIMIZATION: Adaptive throttle based on sliced member count (not total!)
       const memberCount = slicedMembers.size;
       const tickInterval = memberCount > 1000 ? 66 : (memberCount > 500 ? 50 : 33);
+
+      // DYNAMIC GRAVITY: Scale positions based on visible star count.
+      // Fewer visible stars → tighter clustering; more stars → wider spread.
+      const gravityScale = computeDynamicScale(memberCount);
+
+      // Compute centroid of target positions for visible members
+      // (positions are scaled toward this point, keeping clusters centered)
+      let centroidX = 0, centroidY = 0, centroidZ = 0, centroidN = 0;
+      slicedMembers.forEach((m, id) => {
+        const t = targetPos.get(id);
+        if (t) { centroidX += t.x; centroidY += t.y; centroidZ += t.z; centroidN++; }
+      });
+      if (centroidN > 0) {
+        centroidX /= centroidN;
+        centroidY /= centroidN;
+        centroidZ /= centroidN;
+      }
+
+      // Auto-zoom (only when user hasn't manually zoomed)
+      // Factors in dynamic gravity: compacted positions need a closer camera
+      if (!dragRef.current.active && !cam.userZoomed) {
+        const ideal = 50 + slicedMembers.size * 1.5 * gravityScale;
+        cam.td += (ideal - cam.td) * 0.01;
+      }
 
       const now = performance.now();
       if (now - lastTickTimeRef.current > tickInterval) {
@@ -424,9 +442,16 @@ export function Scene() {
           const target = targetPos.get(id);
           if (!target) return;
 
+          // Dynamic gravity: scale position toward visible-member centroid
+          const scaledTarget = {
+            x: centroidX + (target.x - centroidX) * gravityScale,
+            y: centroidY + (target.y - centroidY) * gravityScale,
+            z: centroidZ + (target.z - centroidZ) * gravityScale,
+          };
+
           // Simple animation for all sliced members (slice is already small!)
           if (!m.position) {
-            m.position = { x: target.x, y: target.y, z: target.z };
+            m.position = { x: scaledTarget.x, y: scaledTarget.y, z: scaledTarget.z };
             m.opacity = 0;
             m.scale = 0;
           }
@@ -437,7 +462,7 @@ export function Scene() {
           const isFocusing = cam.focusActive && isSelected;
 
           if (!isFocusing) {
-            m.position = v3lerp(m.position, target, 0.04);
+            m.position = v3lerp(m.position, scaledTarget, 0.04);
           }
           m.opacity = (m.opacity ?? 0) + (0.9 - (m.opacity ?? 0)) * 0.03;
           m.scale = (m.scale ?? 0) + (1 - (m.scale ?? 0)) * 0.04;
