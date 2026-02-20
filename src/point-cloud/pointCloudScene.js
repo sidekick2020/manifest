@@ -6,6 +6,9 @@
     let frameCount = 0;
     let lastTime = performance.now();
     let fps = 0;
+    let lastFrameTime = 0;
+    let frameTimeSmoothed = 16;
+    let fpsSmoothed = 60;
     let mouse = new THREE.Vector2();
     let raycaster = new THREE.Raycaster();
     // Drag detection — suppress click when mouse moved > DRAG_THRESHOLD px
@@ -467,9 +470,9 @@
           riskLevel = 'high';
         }
 
-        // Size variation (based on "activity")
+        // Size variation (based on "activity" for synthetic data)
         const activity = Math.floor(Math.random() * 100);
-        sizes[i] = 2 + Math.log(activity + 1) * 0.5;
+        sizes[i] = sizeFromEngagement(null, activity);
         activities[i] = activity / 100; // Normalize to 0-1
         vertexIndices[i] = i; // Sequential index
 
@@ -921,7 +924,7 @@
       const newIdxArr = new Float32Array(oldIdx.length + 1);
       newPos.set(oldPos); newPos[oldPos.length] = px; newPos[oldPos.length + 1] = py; newPos[oldPos.length + 2] = pz;
       newCol.set(oldCol); newCol[oldCol.length] = color.r; newCol[oldCol.length + 1] = color.g; newCol[oldCol.length + 2] = color.b;
-      newSize.set(oldSize); newSize[oldSize.length] = 2;
+      newSize.set(oldSize); newSize[oldSize.length] = sizeFromEngagement(u.TotalComments);
       newAct.set(oldAct); newAct[oldAct.length] = 0;
       newIdxArr.set(oldIdx); newIdxArr[oldIdx.length] = nextIndex;
       points.geometry.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
@@ -931,6 +934,7 @@
       points.geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(newIdxArr, 1));
       const sobrietyIso = u.sobrietyDate?.iso ?? (typeof u.sobrietyDate === 'string' ? u.sobrietyDate : null);
       const sobrietyDays = sobrietyIso ? Math.floor((Date.now() - new Date(sobrietyIso).getTime()) / 86400000) : 0;
+      const totalCommentsNum = u.TotalComments != null ? Number(u.TotalComments) : 0;
       pointMetadata.push({
         id,
         username: u.username || 'Anonymous',
@@ -939,6 +943,7 @@
         risk: (risk * 100).toFixed(0),
         riskLevel: risk < 0.33 ? 'low' : risk < 0.66 ? 'medium' : 'high',
         activity: 0,
+        totalComments: totalCommentsNum,
         sobrietyDays,
         sobrietyDate: sobrietyIso || null,
         cluster: 'Real Data',
@@ -2059,7 +2064,7 @@
         newColors[newIndex * 3 + 2] = 0;
       }
 
-      newSizes[newIndex] = 2 + Math.log(member.activity + 1) * 0.5;
+      newSizes[newIndex] = sizeFromEngagement(member.totalComments ?? member.TotalComments, member.activity);
       newActivities[newIndex] = Math.min(member.activity / 100, 1);
       newVertexIndices[newIndex] = newIndex;
 
@@ -3343,14 +3348,23 @@
     // Planet LOD: first N get full sprites (with images); the rest are drawn as one Points mesh (no cap on total)
     const PLANET_SPRITE_LOD = 80;    // full-detail sprites so most planets can load images; beyond this use points
     // Beam LOD: draw top N strongest connections; full comment count still shown in UI.
-    // Tuned for FPS: lower caps and aggressive throttle when many beams (see animate()).
-    const MAX_BEAM_SEGMENTS = 56;   // max beams when connection count is low
+    // Static cap = max we build (headroom). Dynamic cap from getBeamSegmentCapForFps() = how many we draw.
+    const MAX_BEAM_SEGMENTS = 56;
     function getBeamSegmentCap(uniqueTargetCount) {
       if (uniqueTargetCount <= 80) return 56;
       if (uniqueTargetCount <= 250) return 44;
       if (uniqueTargetCount <= 800) return 36;
       if (uniqueTargetCount <= 4000) return 28;
-      return 24; // 20K+ comments: draw only top 24 for smooth FPS
+      return 24;
+    }
+    /** Dynamic LOD: when performance is strong (high FPS), draw more beams; when weak, draw fewer. */
+    function getBeamSegmentCapForFps(smoothedFps) {
+      const f = typeof smoothedFps === 'number' && Number.isFinite(smoothedFps) ? smoothedFps : 30;
+      if (f >= 55) return 56;
+      if (f >= 40) return 44;
+      if (f >= 28) return 36;
+      if (f >= 20) return 28;
+      return 24;
     }
 
     async function drawConnectionLines(userId) {
@@ -3649,6 +3663,12 @@
       const fadeIn = beamStartTime ? Math.min(1, (performance.now() - beamStartTime) / 600) : 1;
       const t = performance.now() / 1000;
 
+      // Dynamic beam LOD: draw more segments when FPS is strong, fewer when weak
+      const builtCount = batches[0] && batches[0].targetIndices ? batches[0].targetIndices.length : 0;
+      const dynamicCap = getBeamSegmentCapForFps(fpsSmoothed);
+      const drawCount = Math.min(builtCount, dynamicCap);
+      const drawVertices = drawCount * 2;
+
       // Update shared beam materials once per frame (all batches use the same 3 materials)
       // Pause beam pulse animation while user is navigating to keep FPS up
       if (beamLayerMaterials) {
@@ -3673,8 +3693,11 @@
           buf[o + 5] = posArr[ti * 3 + 2];
         }
         allSegments.forEach(ls => {
-          if (ls && ls.geometry && ls.geometry.attributes && ls.geometry.attributes.position) {
-            ls.geometry.attributes.position.needsUpdate = true;
+          if (ls && ls.geometry) {
+            if (ls.geometry.attributes && ls.geometry.attributes.position) {
+              ls.geometry.attributes.position.needsUpdate = true;
+            }
+            ls.geometry.setDrawRange(0, drawVertices);
           }
         });
       }
@@ -3697,6 +3720,12 @@
       // Update FPS and stats (throttle DOM writes: FPS/memory every 1s, draws every 500ms)
       frameCount++;
       const now = performance.now();
+      if (lastFrameTime > 0) {
+        const delta = now - lastFrameTime;
+        frameTimeSmoothed = frameTimeSmoothed * 0.85 + delta * 0.15;
+        fpsSmoothed = Math.min(120, Math.max(5, 1000 / frameTimeSmoothed));
+      }
+      lastFrameTime = now;
       if (now - lastTime >= 1000) {
         fps = frameCount;
         frameCount = 0;
@@ -4069,6 +4098,12 @@
       }
     }
 
+    /** Star size from TotalComments (and fallback activity): more comments = bigger star. */
+    function sizeFromEngagement(totalComments, fallbackActivity) {
+      const n = totalComments != null ? Number(totalComments) : (fallbackActivity != null ? Number(fallbackActivity) : 0);
+      return 2 + Math.log(1 + n) * 0.6;
+    }
+
     // Helper function to enrich point cloud data incrementally
     function enrichPointCloudData(state) {
       const newPositions = [];
@@ -4106,7 +4141,7 @@
           colors[existingIndex * 3 + 1] = color.g;
           colors[existingIndex * 3 + 2] = color.b;
 
-          sizes[existingIndex] = 2 + Math.log(commentCount + 1) * 0.8;
+          sizes[existingIndex] = sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount);
           activities[existingIndex] = Math.min(activity / 100, 1);
 
           // Update metadata — preserve existing profilePicture and position
@@ -4122,6 +4157,7 @@
             risk: (risk * 100).toFixed(0),
             riskLevel: risk < 0.33 ? 'low' : risk < 0.66 ? 'medium' : 'high',
             activity,
+            totalComments: member.totalComments ?? member.TotalComments ?? pointMetadata[existingIndex]?.totalComments,
             sobrietyDays: member.sobriety
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
@@ -4144,7 +4180,7 @@
           const color = getRiskColor(risk);
           newColors.push(color.r, color.g, color.b);
 
-          newSizes.push(2 + Math.log(commentCount + 1) * 0.8);
+          newSizes.push(sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount));
           newActivities.push(Math.min(activity / 100, 1));
           newVertexIndices.push(nextIndex);
 
@@ -4156,6 +4192,7 @@
             risk: (risk * 100).toFixed(0),
             riskLevel: risk < 0.33 ? 'low' : risk < 0.66 ? 'medium' : 'high',
             activity,
+            totalComments: member.totalComments ?? member.TotalComments ?? null,
             sobrietyDays: member.sobriety
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
@@ -4313,6 +4350,7 @@
         const x = posArr ? posArr[i * 3]     : (m?.position != null && typeof m.position.x === 'number' ? m.position.x : 0);
         const y = posArr ? posArr[i * 3 + 1] : (m?.position != null && typeof m.position.y === 'number' ? m.position.y : 0);
         const z = posArr ? posArr[i * 3 + 2] : (m?.position != null && typeof m.position.z === 'number' ? m.position.z : 0);
+        const tc = m.totalComments != null ? m.totalComments : (m.TotalComments != null ? m.TotalComments : null);
         members.push({
           id:            m.id,
           username:      m.username,
@@ -4321,6 +4359,7 @@
           y: +(Number(y) || 0).toFixed(2),
           z: +(Number(z) || 0).toFixed(2),
           size:          sizeArr ? +(sizeArr[i] || 1).toFixed(2) : 1,
+          totalComments: tc != null ? tc : undefined,
           activity:      actArr  ? +(actArr[i] || 0).toFixed(2) : 0,
           sobrietyDays:  m.sobrietyDays || 0,
         });
@@ -4427,7 +4466,9 @@
         colors[i * 3 + 1] = Math.min(t * 2, 1);
         colors[i * 3 + 2] = 1 - t;
 
-        sizes[i]        = (m.size != null && Number.isFinite(Number(m.size))) ? Number(m.size) : 1;
+        sizes[i]        = (m.totalComments != null || m.TotalComments != null)
+          ? sizeFromEngagement(m.totalComments ?? m.TotalComments)
+          : ((m.size != null && Number.isFinite(Number(m.size))) ? Number(m.size) : 1);
         activities[i]   = Number.isFinite(act) ? act : 0;
         vertexIdxs[i]   = i;
 
@@ -4439,6 +4480,7 @@
           risk:           '50',
           riskLevel:      'medium',
           activity:       Number.isFinite(act) ? act : 0,
+          totalComments:  m.totalComments ?? m.TotalComments ?? null,
           sobrietyDays:   m.sobrietyDays != null ? Number(m.sobrietyDays) : 0,
           cluster:        'Snapshot',
         });
