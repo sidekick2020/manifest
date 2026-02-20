@@ -1280,7 +1280,7 @@
         ? `${metadata.sobrietyDays.toLocaleString()} days`
         : (metadata.sobrietyDate || metadata.sobriety ? '< 1 day' : 'Not set'));
 
-      const locationParts = [metadata.city, metadata.region || metadata.state, metadata.country].filter(Boolean).map(s => String(s).trim());
+      const locationParts = [metadata.city, metadata.region || metadata.state, metadata.country].map(s => s ? String(s).trim() : '').filter(Boolean);
       setDetail('detail-location', locationParts.length > 0 ? locationParts.join(', ') : '—');
 
       if (detailEl) detailEl.classList.add('visible');
