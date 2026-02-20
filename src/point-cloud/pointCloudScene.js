@@ -1,6 +1,6 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-    import { getLocationFilterOptions as getCodecLocationOptions, addLocationFromMember, normalizeRegion, buildIndexes } from '../../lib/codec.js';
+    import { getLocationFilterOptions as getCodecLocationOptions, addLocationFromMember, normalizeRegion, isUSState, buildIndexes } from '../../lib/codec.js';
 
     let scene, camera, renderer, points, controls;
     let rotating = false; // Start paused for better UX
@@ -4176,7 +4176,8 @@
         const metaState = normalizeRegion(meta.state);
         if (metaRegion !== regionVal && metaState !== regionVal) return false;
         // When filtering by a US state (e.g. Arkansas), require country to be US or empty so we don't show "Arkansas, UK" etc.
-        if (regionVal && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
+        // Only apply this check for known US states — non-US regions should not be excluded.
+        if (regionVal && isUSState(regionVal) && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
       }
       if (f.city && f.city.trim()) {
         if (normLoc(meta.city) !== normLoc(f.city)) return false;

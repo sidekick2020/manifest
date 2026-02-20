@@ -2203,6 +2203,15 @@
       return String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
     }
     const US_COUNTRY_VARIANTS = new Set(['', 'us', 'usa', 'united states', 'united states of america']);
+    const US_STATE_NAMES = new Set([
+      'alabama','alaska','arizona','arkansas','california','colorado','connecticut','delaware',
+      'florida','georgia','hawaii','idaho','illinois','indiana','iowa','kansas','kentucky',
+      'louisiana','maine','maryland','massachusetts','michigan','minnesota','mississippi',
+      'missouri','montana','nebraska','nevada','new hampshire','new jersey','new mexico',
+      'new york','north carolina','north dakota','ohio','oklahoma','oregon','pennsylvania',
+      'rhode island','south carolina','south dakota','tennessee','texas','utah','vermont',
+      'virginia','washington','west virginia','wisconsin','wyoming','district of columbia',
+    ]);
 
     function memberMatchesLocationFilter(meta, f) {
       if (!meta) return false;
@@ -2216,7 +2225,8 @@
         const metaRegion = normLoc(meta.region);
         const metaState = normLoc(meta.state);
         if (metaRegion !== regionVal && metaState !== regionVal) return false;
-        if (regionVal && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
+        // Only enforce US country check when filtering by a known US state — non-US regions should not be excluded.
+        if (regionVal && US_STATE_NAMES.has(regionVal) && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
       }
       if (f.city && f.city.trim()) {
         if (normLoc(meta.city) !== normLoc(f.city)) return false;
