@@ -220,6 +220,69 @@
     #search input::placeholder {
       color: var(--color-text-secondary);
     }
+    /* Location filter: region, city, country */
+    #location-filter.location-filter {
+      position: absolute;
+      top: 76px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 99;
+      width: min(520px, 92vw);
+    }
+    .location-filter-toggle {
+      padding: 8px 14px;
+      background: var(--color-bg-button);
+      border: 1px solid var(--color-border-light);
+      border-radius: var(--border-radius-sm);
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+      font-family: var(--font-family);
+      cursor: pointer;
+      transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    }
+    .location-filter-toggle:hover {
+      color: var(--color-text-primary);
+      border-color: var(--color-accent);
+      background: rgba(26, 26, 46, 0.9);
+    }
+    .location-filter-panel {
+      margin-top: 8px;
+      padding: 12px 14px;
+      background: var(--color-bg-panel);
+      border: 1px solid var(--color-border-light);
+      border-radius: var(--border-radius-md);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+      box-shadow: var(--shadow-panel);
+      backdrop-filter: blur(12px);
+    }
+    .location-filter-label { display: flex; flex-direction: column; gap: 4px; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+    .location-filter-label select {
+      min-width: 140px;
+      padding: 8px 10px;
+      background: var(--color-bg-button);
+      border: 1px solid var(--color-border-light);
+      border-radius: var(--border-radius-sm);
+      color: var(--color-text-primary);
+      font-size: var(--font-size-sm);
+      font-family: var(--font-family);
+      cursor: pointer;
+    }
+    .location-filter-label select:focus { outline: none; border-color: var(--color-accent); }
+    .location-filter-clear {
+      padding: 6px 12px;
+      background: transparent;
+      border: 1px solid var(--color-border-light);
+      border-radius: var(--border-radius-sm);
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-xs);
+      font-family: var(--font-family);
+      cursor: pointer;
+      transition: color 0.2s ease, border-color 0.2s ease;
+    }
+    .location-filter-clear:hover { color: var(--color-text-primary); border-color: var(--color-danger); }
     /* Search Autocomplete Dropdown */
     #search-dropdown {
       position: absolute;
@@ -1239,6 +1302,16 @@
     </div>
   </div>
 
+  <div id="location-filter" class="location-filter">
+    <button type="button" id="location-filter-toggle" class="location-filter-toggle" aria-expanded="false" aria-controls="location-filter-panel">Filter by location</button>
+    <div id="location-filter-panel" class="location-filter-panel" role="region" aria-label="Location filters" style="display: none;">
+      <label class="location-filter-label">Country <select id="location-filter-country" aria-label="Filter by country"><option value="">All</option></select></label>
+      <label class="location-filter-label">Region <select id="location-filter-region" aria-label="Filter by region"><option value="">All</option></select></label>
+      <label class="location-filter-label">City <select id="location-filter-city" aria-label="Filter by city"><option value="">All</option></select></label>
+      <button type="button" id="location-filter-clear" class="location-filter-clear" style="display: none;">Clear filters</button>
+    </div>
+  </div>
+
   <button id="clear-connections-btn" onclick="clearConnectionLines()" title="Clear all connection lines" style="display: none;">✕ Clear connections</button>
 
   <!-- Floating username label, positioned via JS each frame -->
@@ -1514,6 +1587,8 @@
     // Store point metadata for interaction
     let pointMetadata = [];
     let selectedMemberIndex = null;
+    /** Location filter: { country, region, city }. Empty string = no filter for that field. */
+    let locationFilter = { country: '', region: '', city: '' };
     // True when page loaded with a user in URL — we show loading screen and do God-view fly-in when ready
     let _initialUrlUserPending = false;
     let _loadingScreenShownAt = 0;
@@ -1780,6 +1855,9 @@
           riskLevel,
           activity,
           sobrietyDays: Math.floor(Math.random() * 365),
+          region: null,
+          city: null,
+          country: null,
           cluster: `Cluster ${clusterId}`,
         });
       }
@@ -2105,6 +2183,36 @@
       if (byId !== undefined) return byId;
       const byUsername = usernameToIndexMap.get(normalized.toLowerCase());
       return byUsername;
+    }
+
+    function sizeFromEngagementForFilter(totalComments, fallbackActivity) {
+      const n = totalComments != null ? Number(totalComments) : (fallbackActivity != null ? Number(fallbackActivity) : 0);
+      return 2 + Math.log(1 + n) * 0.6;
+    }
+
+    function applyLocationFilter() {
+      if (!points || !points.geometry || !pointMetadata.length) return;
+      const sizes = points.geometry.attributes.size.array;
+      const f = locationFilter;
+      const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
+      for (let i = 0; i < pointMetadata.length; i++) {
+        const meta = pointMetadata[i];
+        let match = true;
+        if (hasFilter) {
+          if (f.country && f.country.trim()) {
+            if ((meta.country || '').trim().toLowerCase() !== (f.country || '').trim().toLowerCase()) match = false;
+          }
+          if (match && f.region && f.region.trim()) {
+            if ((meta.region || '').trim().toLowerCase() !== (f.region || '').trim().toLowerCase()) match = false;
+          }
+          if (match && f.city && f.city.trim()) {
+            if ((meta.city || '').trim().toLowerCase() !== (f.city || '').trim().toLowerCase()) match = false;
+          }
+        }
+        const baseSize = sizeFromEngagementForFilter(meta.totalComments, meta.activity);
+        sizes[i] = match ? baseSize : 0;
+      }
+      points.geometry.attributes.size.needsUpdate = true;
     }
 
     function syncUsernameToIndexMap() {
@@ -2737,7 +2845,7 @@
           }),
           order: '-TotalComments',
           limit: '10',
-          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments'
+          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments,region,city,country'
         });
 
         const response = await fetch(`https://parseapi.back4app.com/classes/_User?${params}`, {
@@ -2772,7 +2880,10 @@
               activity: 0,
               risk: 50,
               riskLevel: 'medium',
-              totalComments: member.TotalComments || 0
+              totalComments: member.TotalComments || 0,
+              region: member.region ?? null,
+              city: member.city ?? null,
+              country: member.country ?? null,
             },
             index: existingIndex, // Will be -1 if not in universe
             isNew: existingIndex === -1
@@ -4963,6 +5074,23 @@
       sidebar.classList.toggle('visible');
     };
 
+    window.getLocationFilterOptions = () => {
+      if (!pointMetadata || pointMetadata.length === 0) return { countries: [], regions: [], cities: [] };
+      const countries = [...new Set(pointMetadata.map(m => (m.country || '').trim()).filter(Boolean))].sort();
+      const regions = [...new Set(pointMetadata.map(m => (m.region || '').trim()).filter(Boolean))].sort();
+      const cities = [...new Set(pointMetadata.map(m => (m.city || '').trim()).filter(Boolean))].sort();
+      return { countries, regions, cities };
+    };
+
+    window.setLocationFilter = (f) => {
+      locationFilter = {
+        country: (f && f.country) ? String(f.country).trim() : '',
+        region:  (f && f.region)  ? String(f.region).trim()  : '',
+        city:    (f && f.city)   ? String(f.city).trim()    : '',
+      };
+      applyLocationFilter();
+    };
+
     // Click outside to close admin sidebar
     function handleClickOutside(event) {
       const sidebar = document.getElementById('admin-sidebar');
@@ -5139,6 +5267,9 @@
             sobrietyDays: member.sobriety
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
+            region: member.region ?? null,
+            city: member.city ?? null,
+            country: member.country ?? null,
             cluster: 'Real Data',
           };
         } else {
@@ -5172,6 +5303,9 @@
             sobrietyDays: member.sobriety
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
+            region: member.region ?? null,
+            city: member.city ?? null,
+            country: member.country ?? null,
             cluster: 'Real Data',
           });
 
@@ -5264,6 +5398,7 @@
       }
 
       syncUsernameToIndexMap();
+      applyLocationFilter();
       // If URL has a user id or username, select that user (e.g. returning to a bookmarked link)
       if (points && pointMetadata.length > 0) applyUserFromUrl();
     }
@@ -5307,6 +5442,9 @@
       return syntheticCount >= Math.min(5, sample.length);
     }
 
+    const SNAPSHOT_MAX_MEMBERS = 30000; // Cap to avoid localStorage quota (~5MB); incremental load continues for rest
+    let _snapshotQuotaWarned = false;
+
     function saveSnapshot(skips) {
       // Serialize the current point cloud into a compact member array.
       if (!pointMetadata || pointMetadata.length === 0) return;
@@ -5315,31 +5453,40 @@
       const sizeArr = geo ? geo.attributes.size.array : null;
       const actArr = geo ? geo.attributes.activity.array : null;
 
-      const members = pointMetadata.map((m, i) => {
+      const total = pointMetadata.length;
+      const cap = Math.min(total, SNAPSHOT_MAX_MEMBERS);
+      const members = [];
+      for (let i = 0; i < cap; i++) {
+        const m = pointMetadata[i];
         const x = posArr ? posArr[i * 3]     : (m?.position != null && typeof m.position.x === 'number' ? m.position.x : 0);
         const y = posArr ? posArr[i * 3 + 1] : (m?.position != null && typeof m.position.y === 'number' ? m.position.y : 0);
         const z = posArr ? posArr[i * 3 + 2] : (m?.position != null && typeof m.position.z === 'number' ? m.position.z : 0);
-        return {
+        members.push({
           id:            m.id,
           username:      m.username,
-          proPic:        m.profilePicture || null,
-          x, y, z,
-          size:          sizeArr ? sizeArr[i] : 1,
-          activity:      actArr  ? actArr[i]  : 0,
+          proPic:        i < 15000 ? (m.profilePicture || null) : null, // omit proPic for tail to save space
+          x: +(Number(x) || 0).toFixed(2),
+          y: +(Number(y) || 0).toFixed(2),
+          z: +(Number(z) || 0).toFixed(2),
+          size:          sizeArr ? +(sizeArr[i] || 1).toFixed(2) : 1,
+          activity:      actArr  ? +(actArr[i] || 0).toFixed(2) : 0,
           sobrietyDays:  m.sobrietyDays || 0,
-        };
-      });
+          region:        m.region ?? null,
+          city:          m.city ?? null,
+          country:       m.country ?? null,
+        });
+      }
 
       const snap = {
         version:   SNAPSHOT_VERSION,
         timestamp: Date.now(),
-        skips,
+        skips:     cap < total ? { ...skips, totalMembers: cap } : skips,
         members,
       };
 
       try {
         localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
-        updateSnapshotStatus(members.length, snap.timestamp);
+        updateSnapshotStatus(members.length, snap.timestamp, cap < total ? ` (capped ${cap.toLocaleString()})` : '');
         // Persist beam + post caches so after restore we don't refetch when navigating to same members
         if (typeof beamDataCache !== 'undefined' && typeof postCacheByUser !== 'undefined') {
           const beamEntries = [];
@@ -5368,8 +5515,7 @@
           } catch (eNav) { /* quota; skip nav cache */ }
         }
       } catch (e) {
-        // localStorage quota exceeded — round-trip coordinates to 3 decimal places to shrink size.
-        // NEVER strip proPic — that causes profile images to go blank after restore.
+        // Quota exceeded — try compact (fewer decimals) then reduced (fewer members, no proPic for tail).
         const compact = {
           ...snap,
           members: members.map(m => ({
@@ -5379,8 +5525,8 @@
             x: +(Number(m.x) || 0).toFixed(3),
             y: +(Number(m.y) || 0).toFixed(3),
             z: +(Number(m.z) || 0).toFixed(3),
-            size: +m.size.toFixed(2),
-            activity: +m.activity.toFixed(3),
+            size: +(Number(m.size) || 1).toFixed(2),
+            activity: +(Number(m.activity) || 0).toFixed(3),
             sobrietyDays: m.sobrietyDays || 0,
           }))
         };
@@ -5388,8 +5534,30 @@
           localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(compact));
           updateSnapshotStatus(members.length, snap.timestamp, '(compact)');
         } catch (e2) {
-          // Still too large — skip snapshot entirely rather than saving broken data
-          console.warn('[Snapshot] localStorage full even after compaction, skipping save:', e2.message);
+          const reducedCap = Math.min(members.length, 15000);
+          const smaller = members.slice(0, reducedCap).map(m => ({
+            id: m.id,
+            username: m.username,
+            proPic: null,
+            x: m.x,
+            y: m.y,
+            z: m.z,
+            size: m.size,
+            activity: m.activity,
+            sobrietyDays: m.sobrietyDays || 0,
+            region: m.region ?? null,
+            city: m.city ?? null,
+            country: m.country ?? null,
+          }));
+          try {
+            localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ ...snap, members: smaller, skips: { ...snap.skips, totalMembers: reducedCap } }));
+            updateSnapshotStatus(smaller.length, snap.timestamp, '(reduced)');
+          } catch (e3) {
+            if (!_snapshotQuotaWarned) {
+              _snapshotQuotaWarned = true;
+              console.warn('[Snapshot] localStorage full even after compaction, skipping save:', e3.message);
+            }
+          }
         }
       }
     }
@@ -5444,6 +5612,9 @@
           riskLevel:      'medium',
           activity:       Number.isFinite(act) ? act : 0,
           sobrietyDays:   m.sobrietyDays != null ? Number(m.sobrietyDays) : 0,
+          region:         m.region ?? null,
+          city:           m.city ?? null,
+          country:        m.country ?? null,
           cluster:        'Snapshot',
         });
 
@@ -5479,6 +5650,8 @@
       }
       points = new THREE.Points(geometry, material);
       scene.add(points);
+
+      if (typeof applyLocationFilter === 'function') applyLocationFilter();
 
       // Restore navigation caches so opening previously visited members doesn't trigger API calls
       if (typeof beamDataCache !== 'undefined' && typeof postCacheByUser !== 'undefined') {

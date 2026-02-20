@@ -225,6 +225,8 @@
     // Store point metadata for interaction
     let pointMetadata = [];
     let selectedMemberIndex = null;
+    /** Location filter: { country, region, city }. Empty string = no filter for that field. */
+    let locationFilter = { country: '', region: '', city: '' };
     // True when page loaded with a user in URL — we show loading screen and do God-view fly-in when ready
     let _initialUrlUserPending = false;
     let _loadingScreenShownAt = 0;
@@ -486,6 +488,9 @@
           riskLevel,
           activity,
           sobrietyDays: Math.floor(Math.random() * 365),
+          region: null,
+          city: null,
+          country: null,
           cluster: `Cluster ${clusterId}`,
         });
       }
@@ -865,7 +870,7 @@
       const params = new URLSearchParams({
         where: JSON.stringify(where),
         limit: '1',
-        keys: 'objectId,username,sobrietyDate,createdAt,proPic,profilePicture,updatedAt,TotalComments',
+        keys: 'objectId,username,sobrietyDate,createdAt,proPic,profilePicture,updatedAt,TotalComments,region,city,country',
       });
       const B4A_HEADERS = {
         'X-Parse-Application-Id': 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by',
@@ -895,6 +900,9 @@
         created: u.createdAt,
         proPic: proPicUrl,
         totalComments: u.TotalComments != null ? Number(u.TotalComments) : null,
+        region: u.region ?? null,
+        city: u.city ?? null,
+        country: u.country ?? null,
         mass: 1,
         position: null,
         opacity: 0,
@@ -946,6 +954,9 @@
         totalComments: totalCommentsNum,
         sobrietyDays,
         sobrietyDate: sobrietyIso || null,
+        region: u.region ?? null,
+        city: u.city ?? null,
+        country: u.country ?? null,
         cluster: 'Real Data',
       });
       memberIndexMap.set(id, nextIndex);
@@ -1554,7 +1565,7 @@
           }),
           order: '-TotalComments',
           limit: '10',
-          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments'
+          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments,region,city,country'
         });
 
         const response = await fetch(`https://parseapi.back4app.com/classes/_User?${params}`, {
@@ -1590,7 +1601,10 @@
               activity: 0,
               risk: 50,
               riskLevel: 'medium',
-              totalComments: member.TotalComments || 0
+              totalComments: member.TotalComments || 0,
+              region: member.region ?? null,
+              city: member.city ?? null,
+              country: member.country ?? null,
             },
             index: existingIndex,
             isNew: existingIndex === -1
@@ -3978,6 +3992,27 @@
       sidebar.classList.toggle('visible');
     };
 
+    /** Return unique region/city/country values from point metadata for filter dropdowns. */
+    window.getLocationFilterOptions = () => {
+      if (!pointMetadata || pointMetadata.length === 0) {
+        return { countries: [], regions: [], cities: [] };
+      }
+      const countries = [...new Set(pointMetadata.map(m => (m.country || '').trim()).filter(Boolean))].sort();
+      const regions = [...new Set(pointMetadata.map(m => (m.region || '').trim()).filter(Boolean))].sort();
+      const cities = [...new Set(pointMetadata.map(m => (m.city || '').trim()).filter(Boolean))].sort();
+      return { countries, regions, cities };
+    };
+
+    /** Set location filter and re-apply (hide non-matching points). */
+    window.setLocationFilter = (f) => {
+      locationFilter = {
+        country: (f && f.country) ? String(f.country).trim() : '',
+        region:  (f && f.region)  ? String(f.region).trim()  : '',
+        city:    (f && f.city)   ? String(f.city).trim()    : '',
+      };
+      applyLocationFilter();
+    };
+
     // Click outside to close admin sidebar
     function handleClickOutside(event) {
       const sidebar = document.getElementById('admin-sidebar');
@@ -4104,6 +4139,32 @@
       return 2 + Math.log(1 + n) * 0.6;
     }
 
+    /** Apply location filter: set size to 0 for points that don't match country/region/city. */
+    function applyLocationFilter() {
+      if (!points || !points.geometry || !pointMetadata.length) return;
+      const sizes = points.geometry.attributes.size.array;
+      const f = locationFilter;
+      const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
+      for (let i = 0; i < pointMetadata.length; i++) {
+        const meta = pointMetadata[i];
+        let match = true;
+        if (hasFilter) {
+          if (f.country && f.country.trim()) {
+            if ((meta.country || '').trim().toLowerCase() !== (f.country || '').trim().toLowerCase()) match = false;
+          }
+          if (match && f.region && f.region.trim()) {
+            if ((meta.region || '').trim().toLowerCase() !== (f.region || '').trim().toLowerCase()) match = false;
+          }
+          if (match && f.city && f.city.trim()) {
+            if ((meta.city || '').trim().toLowerCase() !== (f.city || '').trim().toLowerCase()) match = false;
+          }
+        }
+        const baseSize = sizeFromEngagement(meta.totalComments, meta.activity);
+        sizes[i] = match ? baseSize : 0;
+      }
+      points.geometry.attributes.size.needsUpdate = true;
+    }
+
     // Helper function to enrich point cloud data incrementally
     function enrichPointCloudData(state) {
       const newPositions = [];
@@ -4161,6 +4222,9 @@
             sobrietyDays: member.sobriety
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
+            region: member.region ?? null,
+            city: member.city ?? null,
+            country: member.country ?? null,
             cluster: 'Real Data',
           };
         } else {
@@ -4196,6 +4260,9 @@
             sobrietyDays: member.sobriety
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
+            region: member.region ?? null,
+            city: member.city ?? null,
+            country: member.country ?? null,
             cluster: 'Real Data',
           });
 
@@ -4288,6 +4355,7 @@
       }
 
       syncUsernameToIndexMap();
+      applyLocationFilter();
       // If URL has a user id or username, select that user (e.g. returning to a bookmarked link)
       if (points && pointMetadata.length > 0) applyUserFromUrl();
     }
@@ -4362,6 +4430,9 @@
           totalComments: tc != null ? tc : undefined,
           activity:      actArr  ? +(actArr[i] || 0).toFixed(2) : 0,
           sobrietyDays:  m.sobrietyDays || 0,
+          region:        m.region ?? null,
+          city:          m.city ?? null,
+          country:       m.country ?? null,
         });
       }
 
@@ -4414,14 +4485,17 @@
           size: m.size,
           activity: m.activity,
           sobrietyDays: m.sobrietyDays || 0,
+          region: m.region ?? null,
+          city: m.city ?? null,
+          country: m.country ?? null,
         }));
         try {
-          localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ ...snap, members: smaller }));
+          localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({ ...snap, members: smaller, skips: { ...snap.skips, totalMembers: smaller.length } }));
           updateSnapshotStatus(smaller.length, snap.timestamp, '(reduced)');
         } catch (e2) {
           if (!_snapshotQuotaWarned) {
             _snapshotQuotaWarned = true;
-            console.warn('[Snapshot] localStorage full, skipping save. Clear site data or use fewer members.');
+            console.warn('[Snapshot] localStorage full even after compaction, skipping save:', e2.message);
           }
         }
       }
@@ -4482,6 +4556,9 @@
           activity:       Number.isFinite(act) ? act : 0,
           totalComments:  m.totalComments ?? m.TotalComments ?? null,
           sobrietyDays:   m.sobrietyDays != null ? Number(m.sobrietyDays) : 0,
+          region:         m.region ?? null,
+          city:           m.city ?? null,
+          country:        m.country ?? null,
           cluster:        'Snapshot',
         });
 
@@ -4517,6 +4594,8 @@
       }
       points = new THREE.Points(geometry, material);
       scene.add(points);
+
+      applyLocationFilter();
 
       // Restore navigation caches so opening previously visited members doesn't trigger API calls
       if (typeof beamDataCache !== 'undefined' && typeof postCacheByUser !== 'undefined') {
