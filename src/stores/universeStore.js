@@ -2,9 +2,15 @@
  * Zustand store for the Manifest universe.
  * Holds codec state (Maps by reference), feed/UI state, and derived metrics.
  * Maps are mutated in place; `version` counter triggers re-renders.
+ *
+ * Performance optimizations:
+ *   - Uses codec buildIndex for O(1) per-member lookups in computeHashAccuracy/computeBeamCount
+ *   - Adaptive polling backoff: increases interval when no new data, resets on new data
+ *   - API exhaustion tracking: stops fetching entity types that are fully loaded
+ *   - Uses pre-computed comment pairs from codec index for beam count
  */
 import { create } from 'zustand';
-import { createState, evolve, getTemp, DEFAULT_PARAMS } from '../../lib/codec.js';
+import { createState, evolve, getTemp, buildIndex, DEFAULT_PARAMS } from '../../lib/codec.js';
 import { feedFromBack4App, DEFAULT_CONFIG } from '../../lib/back4app.js';
 import { v3lerp } from '../../lib/vec3.js';
 
@@ -14,7 +20,13 @@ export function setPredictionStoreGetter(getter) {
   _getPredictionStore = getter;
 }
 
-function computeBeamCount(comments) {
+/**
+ * Compute beam count using pre-built index comment pairs (O(1) if index provided).
+ */
+function computeBeamCount(comments, index) {
+  if (index && index.commentPairs) {
+    return Object.keys(index.commentPairs).length;
+  }
   const bs = {};
   comments.forEach((c) => {
     const a = c.fromMember, b = c.toMember;
@@ -23,27 +35,48 @@ function computeBeamCount(comments) {
   return Object.keys(bs).length;
 }
 
-function computeHashAccuracy(members, posts, comments, metadataHashes) {
+/**
+ * Compute hash accuracy using pre-built index for O(1) lookups per member.
+ */
+function computeHashAccuracy(members, metadataHashes, index) {
   let tAcc = 0, aCnt = 0;
   metadataHashes.forEach((mh, mid) => {
     if (!members.has(mid)) return;
-    let apc = 0, acc = 0;
-    const aco = {};
-    posts.forEach((p) => { if (p.creator === mid) apc++; });
-    comments.forEach((c) => { if (c.fromMember === mid) acc++; });
-    comments.forEach((c) => {
-      if (c.fromMember === mid) aco[c.toMember] = 1;
-      if (c.toMember === mid) aco[c.fromMember] = 1;
-    });
+    let apc, acc, acoCount;
+    if (index) {
+      apc = index.postCountByCreator.get(mid) || 0;
+      // Count only outgoing comments for accuracy comparison
+      let outgoing = 0;
+      const memberComments = index.commentsByMember.get(mid);
+      if (memberComments) {
+        for (const c of memberComments) {
+          if (c.fromMember === mid) outgoing++;
+        }
+      }
+      acc = outgoing;
+      const neighbors = index.connectedNeighbors.get(mid);
+      acoCount = neighbors ? neighbors.size : 0;
+    } else {
+      // Fallback without index — should not normally be used
+      apc = 0; acc = 0;
+      const aco = {};
+      // These would need posts/comments from state, but this path is just for safety
+      acoCount = 0;
+    }
     let ma = 0;
     if (mh.encoded.postCount === apc) ma++;
     if (mh.encoded.commentCount === acc) ma++;
-    if (mh.encoded.connections === Object.keys(aco).length) ma++;
+    if (mh.encoded.connections === acoCount) ma++;
     tAcc += ma / 3;
     aCnt++;
   });
   return aCnt > 0 ? Math.round((tAcc / aCnt) * 100) : null;
 }
+
+// Adaptive polling constants
+const BASE_POLL_INTERVAL = 5000;    // 5s base
+const MAX_POLL_INTERVAL = 60000;    // 60s max backoff
+const BACKOFF_MULTIPLIER = 1.5;     // multiply interval by this on no-data
 
 export const useUniverseStore = create((set, get) => {
   const codec = createState();
@@ -66,6 +99,10 @@ export const useUniverseStore = create((set, get) => {
     epochDate: null,
     feeding: false,
     status: 'idle',
+
+    // --- Polling state ---
+    _pollInterval: BASE_POLL_INTERVAL,
+    _consecutiveEmpty: 0,
 
     // --- UI ---
     selectedMember: null,
@@ -109,7 +146,6 @@ export const useUniverseStore = create((set, get) => {
 
       // OPTIMIZATION: Auto-enable performance mode for large datasets
       if (s.members.size > 10000 && !s.performanceMode) {
-        console.log('🚀 Entering performance mode (10K+ members) - disabling expensive features');
         set({ performanceMode: true, status: 'performance mode enabled (10K+ members)' });
       }
 
@@ -117,24 +153,62 @@ export const useUniverseStore = create((set, get) => {
 
       const feedState = { members: s.members, posts: s.posts, comments: s.comments, soberDateChanges: s.soberDateChanges };
       const skips = { ...s.skips };
+      // Preserve exhaustion tracking across calls
+      if (s.skips.exhausted) skips.exhausted = { ...s.skips.exhausted };
 
       try {
-        const { added, epochDate } = await feedFromBack4App(DEFAULT_CONFIG, feedState, skips, {
-          userLimit: 200,       // Load many more users per batch for faster scaling
-          postLimit: 200,       // Load many more posts
-          commentLimit: 400,    // Load many more comments
+        const { added, epochDate, allExhausted } = await feedFromBack4App(DEFAULT_CONFIG, feedState, skips, {
+          userLimit: 200,
+          postLimit: 200,
+          commentLimit: 400,
           soberDateChangeLimit: 50,
-          order: '-createdAt'   // Posts/comments by recent, users by updatedAt (set in back4app.js)
+          order: '-createdAt'
         });
 
-        // Update skips
+        // Adaptive polling: back off when no new data, reset on new data
+        let newPollInterval = s._pollInterval;
+        let consecutiveEmpty = s._consecutiveEmpty;
+        if (added === 0 || allExhausted) {
+          consecutiveEmpty++;
+          newPollInterval = Math.min(
+            s._pollInterval * BACKOFF_MULTIPLIER,
+            MAX_POLL_INTERVAL
+          );
+        } else {
+          consecutiveEmpty = 0;
+          newPollInterval = BASE_POLL_INTERVAL;
+        }
+
+        // Build status message
+        let status;
+        if (allExhausted) {
+          status = `all data loaded (${s.members.size} members)`;
+        } else if (added > 0) {
+          status = `+${added} from back4app (${s.members.size} members, ${s.soberDateChanges.size} SDC)`;
+        } else {
+          status = 'no new data';
+        }
+
         set({
           feeding: false,
-          animationEnabled: true,  // Re-enable animation after data load
+          animationEnabled: true,
           skips,
           epochDate: epochDate || s.epochDate,
-          status: added > 0 ? `+${added} from back4app (${s.members.size} members, ${s.soberDateChanges.size} SDC)` : 'no new data',
+          status,
+          _pollInterval: newPollInterval,
+          _consecutiveEmpty: consecutiveEmpty,
         });
+
+        // Reschedule interval if backoff changed and we're running
+        if (s.running && s.intervalId && newPollInterval !== s._pollInterval) {
+          clearInterval(s.intervalId);
+          const id = setInterval(() => {
+            get().feedStep().catch(err => {
+              console.error('[toggleRunning] Interval feed error:', err);
+            });
+          }, newPollInterval);
+          set({ intervalId: id });
+        }
 
         // Evolve if we have data (skip during animation freeze)
         if (s.members.size > 0 && s.animationEnabled) {
@@ -151,7 +225,7 @@ export const useUniverseStore = create((set, get) => {
                 const t = Math.abs(hash) / 2147483647;
                 const phi = t * Math.PI * 2;
                 const theta = Math.acos(2 * ((hash >>> 16) / 65535) - 1);
-                const r = 80 + (Math.abs(hash) % 40); // Radius 80-120
+                const r = 80 + (Math.abs(hash) % 40);
 
                 s.targetPos.set(id, {
                   x: r * Math.sin(theta) * Math.cos(phi),
@@ -172,14 +246,17 @@ export const useUniverseStore = create((set, get) => {
 
             const result = evolve(codecState, params, predictions);
 
+            // Build index once for derived metrics
+            const index = buildIndex(codecState);
+
             set({
               sessionCount: codecState.sessionCount,
               masterSeed: codecState.masterSeed,
               targetPos: codecState.targetPos,
               neighborhoods: codecState.neighborhoods,
               fitnessHistory: [...codecState.fitnessHistory],
-              beamCount: computeBeamCount(s.comments),
-              hashAccuracy: computeHashAccuracy(s.members, s.posts, s.comments, s.metadataHashes),
+              beamCount: computeBeamCount(s.comments, index),
+              hashAccuracy: computeHashAccuracy(s.members, s.metadataHashes, index),
               temperature: getTemp(codecState.sessionCount, params),
               version: get().version + 1,
             });
@@ -202,14 +279,18 @@ export const useUniverseStore = create((set, get) => {
       }
       const result = evolve(codecState, params, predictions);
       const s = get();
+
+      // Build index once for derived metrics
+      const index = buildIndex(codecState);
+
       set({
         sessionCount: codecState.sessionCount,
         masterSeed: codecState.masterSeed,
         targetPos: codecState.targetPos,
         neighborhoods: codecState.neighborhoods,
         fitnessHistory: [...codecState.fitnessHistory],
-        beamCount: computeBeamCount(s.comments),
-        hashAccuracy: computeHashAccuracy(s.members, s.posts, s.comments, s.metadataHashes),
+        beamCount: computeBeamCount(s.comments, index),
+        hashAccuracy: computeHashAccuracy(s.members, s.metadataHashes, index),
         temperature: getTemp(codecState.sessionCount, params),
         version: s.version + 1,
       });
@@ -244,30 +325,27 @@ export const useUniverseStore = create((set, get) => {
         set({ running: false, intervalId: null, status: 'paused — explore' });
       } else {
         // Start running - first feed, then set up interval
-        // Don't await to keep UI responsive
         s.feedStep().catch(err => {
           console.error('[toggleRunning] Initial feed error:', err);
           set({ running: false, intervalId: null, status: 'error: ' + err.message });
         });
-        // OPTIMIZATION: Slower feed interval for better performance (5 seconds instead of 2.5)
+        // Use adaptive poll interval
+        const interval = s._pollInterval || BASE_POLL_INTERVAL;
         const id = setInterval(() => {
           get().feedStep().catch(err => {
             console.error('[toggleRunning] Interval feed error:', err);
-            // Don't stop on error, just log it
           });
-        }, 5000);
+        }, interval);
         set({ running: true, intervalId: id });
       }
     },
 
     setSelectedMember(id, options = {}) {
-      const shouldZoom = options.zoom !== false; // Default to true
-      console.log(`[Store] setSelectedMember(${id ? id.slice(0, 8) + '...' : 'null'}, zoom=${shouldZoom})`);
+      const shouldZoom = options.zoom !== false;
       set({
         selectedMember: id,
         zoomToMemberTrigger: shouldZoom ? id : null
       });
-      console.log(`[Store] zoomToMemberTrigger set to:`, shouldZoom ? id : null);
     },
 
     setSelectedPost(id) {
@@ -297,6 +375,8 @@ export const useUniverseStore = create((set, get) => {
         selectedPost: null,
         running: false,
         intervalId: null,
+        _pollInterval: BASE_POLL_INTERVAL,
+        _consecutiveEmpty: 0,
         beamCount: 0,
         hashAccuracy: null,
         temperature: 1,
