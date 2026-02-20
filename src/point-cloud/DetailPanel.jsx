@@ -20,6 +20,9 @@ export function DetailPanel() {
           <div className="detail-header-id">
             <strong>ID:</strong> <span id="detail-id">-</span>
           </div>
+          <div className="detail-header-location" style={{ marginTop: 6, fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
+            <strong>Location:</strong> <span id="detail-location">—</span>
+          </div>
         </div>
       </div>
 

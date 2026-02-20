@@ -152,6 +152,88 @@ button.active {
   z-index: 100;
   width: min(520px, 92vw);
 }
+
+/* Location filter: region, city, country */
+#location-filter.location-filter {
+  position: absolute;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99;
+  width: min(520px, 92vw);
+}
+.location-filter-toggle {
+  padding: 8px 14px;
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.location-filter-toggle:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+  background: rgba(26, 26, 46, 0.9);
+}
+.location-filter-badge {
+  color: var(--color-accent);
+  font-weight: var(--font-weight-medium);
+  margin-left: 4px;
+}
+.location-filter-panel {
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--border-radius-md);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(12px);
+}
+.location-filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+.location-filter-label select {
+  min-width: 140px;
+  padding: 8px 10px;
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family);
+  cursor: pointer;
+}
+.location-filter-label select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.location-filter-clear {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-family);
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.location-filter-clear:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-danger);
+}
+
 /* Floating username label anchored to selected star */
 #star-label {
   position: fixed;
@@ -1063,6 +1145,22 @@ button:active, .btn:active {
   #search input {
     padding: 14px 20px;
     font-size: 16px; /* prevents iOS zoom on focus */
+  }
+  #location-filter.location-filter {
+    top: 72px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    transform: none;
+  }
+  .location-filter-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .location-filter-label select {
+    min-width: 0;
+    width: 100%;
   }
   #clear-connections-btn {
     top: auto;

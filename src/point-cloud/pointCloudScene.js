@@ -1,5 +1,6 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+    import { getLocationFilterOptions as getCodecLocationOptions, addLocationFromMember } from '../../lib/codec.js';
 
     let scene, camera, renderer, points, controls;
     let rotating = false; // Start paused for better UX
@@ -340,6 +341,13 @@
         float camDist = length(mvPosition.xyz);
         vCamDist = camDist;
 
+        // Filtered-out points (location filter): size is 0 → don't draw at all
+        if (size < 0.001) {
+          gl_PointSize = 0.0;
+          gl_Position = projectionMatrix * mvPosition;
+          return;
+        }
+
         // Distance-based LOD
         // Far (250+): larger minimum so stars stay visible and bright from distance
         // Close (30-): boost for detail
@@ -489,6 +497,7 @@
           activity,
           sobrietyDays: Math.floor(Math.random() * 365),
           region: null,
+          state: null,
           city: null,
           country: null,
           cluster: `Cluster ${clusterId}`,
@@ -870,7 +879,7 @@
       const params = new URLSearchParams({
         where: JSON.stringify(where),
         limit: '1',
-        keys: 'objectId,username,sobrietyDate,createdAt,proPic,profilePicture,updatedAt,TotalComments,region,city,country',
+        keys: 'objectId,username,sobrietyDate,createdAt,proPic,profilePicture,updatedAt,TotalComments,region,state,city,country',
       });
       const B4A_HEADERS = {
         'X-Parse-Application-Id': 'Wuo5quzr8f2vZDeSSskftVcDKPUpm16VHdDLm3by',
@@ -890,6 +899,7 @@
       const id = u.objectId;
       if (memberIndexMap.get(id) !== undefined) return memberIndexMap.get(id);
 
+      addLocationFromMember(u);
       const proPicUrl = (u.proPic && (typeof u.proPic === 'string' ? u.proPic : u.proPic.url)) || (u.profilePicture && (typeof u.profilePicture === 'string' ? u.profilePicture : u.profilePicture.url)) || null;
       const codecModule = await import('../../lib/codec.js');
       const { createState, evolve, DEFAULT_PARAMS } = codecModule;
@@ -901,6 +911,7 @@
         proPic: proPicUrl,
         totalComments: u.TotalComments != null ? Number(u.TotalComments) : null,
         region: u.region ?? null,
+        state: u.state ?? null,
         city: u.city ?? null,
         country: u.country ?? null,
         mass: 1,
@@ -932,7 +943,8 @@
       const newIdxArr = new Float32Array(oldIdx.length + 1);
       newPos.set(oldPos); newPos[oldPos.length] = px; newPos[oldPos.length + 1] = py; newPos[oldPos.length + 2] = pz;
       newCol.set(oldCol); newCol[oldCol.length] = color.r; newCol[oldCol.length + 1] = color.g; newCol[oldCol.length + 2] = color.b;
-      newSize.set(oldSize); newSize[oldSize.length] = sizeFromEngagement(u.TotalComments);
+      const sizeForNew = sizeFromEngagement(u.TotalComments);
+      newSize.set(oldSize); newSize[oldSize.length] = memberMatchesLocationFilter(u, locationFilter) ? sizeForNew : 0;
       newAct.set(oldAct); newAct[oldAct.length] = 0;
       newIdxArr.set(oldIdx); newIdxArr[oldIdx.length] = nextIndex;
       points.geometry.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
@@ -955,6 +967,7 @@
         sobrietyDays,
         sobrietyDate: sobrietyIso || null,
         region: u.region ?? null,
+        state: u.state ?? null,
         city: u.city ?? null,
         country: u.country ?? null,
         cluster: 'Real Data',
@@ -962,6 +975,7 @@
       memberIndexMap.set(id, nextIndex);
       loadedMemberIds.add(id);
       syncUsernameToIndexMap();
+      applyLocationFilter();
       await loadPostsAndCommentsForUser(id);
       return nextIndex;
     }
@@ -1266,6 +1280,9 @@
         ? `${metadata.sobrietyDays.toLocaleString()} days`
         : (metadata.sobrietyDate || metadata.sobriety ? '< 1 day' : 'Not set'));
 
+      const locationParts = [metadata.city, metadata.region || metadata.state, metadata.country].filter(Boolean).map(s => String(s).trim());
+      setDetail('detail-location', locationParts.length > 0 ? locationParts.join(', ') : '—');
+
       if (detailEl) detailEl.classList.add('visible');
       if (detailEl && window.innerWidth <= 768) {
         detailEl.classList.remove('detail-expanded');
@@ -1565,7 +1582,7 @@
           }),
           order: '-TotalComments',
           limit: '10',
-          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments,region,city,country'
+          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments,region,state,city,country'
         });
 
         const response = await fetch(`https://parseapi.back4app.com/classes/_User?${params}`, {
@@ -1603,6 +1620,7 @@
               riskLevel: 'medium',
               totalComments: member.TotalComments || 0,
               region: member.region ?? null,
+              state: member.state ?? null,
               city: member.city ?? null,
               country: member.country ?? null,
             },
@@ -2089,6 +2107,8 @@
       points.geometry.setAttribute('activity', new THREE.BufferAttribute(newActivities, 1));
       points.geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(newVertexIndices, 1));
 
+      addLocationFromMember(member);
+
       // Add to metadata
       pointMetadata.push({
         ...member,
@@ -2097,6 +2117,8 @@
 
       // Register in memberIndexMap so planets orbit at the right position
       memberIndexMap.set(member.id, newIndex);
+
+      applyLocationFilter();
       loadedMemberIds.add(member.id);
       const un = (member.username && String(member.username).trim()) ? String(member.username).trim().toLowerCase() : '';
       if (un && un !== 'anonymous' && !/^user\d+$/.test(un)) {
@@ -3992,16 +4014,8 @@
       sidebar.classList.toggle('visible');
     };
 
-    /** Return unique region/city/country values from point metadata for filter dropdowns. */
-    window.getLocationFilterOptions = () => {
-      if (!pointMetadata || pointMetadata.length === 0) {
-        return { countries: [], regions: [], cities: [] };
-      }
-      const countries = [...new Set(pointMetadata.map(m => (m.country || '').trim()).filter(Boolean))].sort();
-      const regions = [...new Set(pointMetadata.map(m => (m.region || '').trim()).filter(Boolean))].sort();
-      const cities = [...new Set(pointMetadata.map(m => (m.city || '').trim()).filter(Boolean))].sort();
-      return { countries, regions, cities };
-    };
+    /** Return all accumulated region/city/country values from codec (all users ever loaded), not just current point cloud. */
+    window.getLocationFilterOptions = () => getCodecLocationOptions();
 
     /** Set location filter and re-apply (hide non-matching points). */
     window.setLocationFilter = (f) => {
@@ -4139,26 +4153,50 @@
       return 2 + Math.log(1 + n) * 0.6;
     }
 
-    /** Apply location filter: set size to 0 for points that don't match country/region/city. */
+    /** Normalize string for location comparison: string, trim, collapse whitespace, lowercase. */
+    function normLoc(s) {
+      return String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    /** US country values we accept when filtering by a US state (e.g. Arkansas). Excludes non-US "Arkansas" etc. */
+    const US_COUNTRY_VARIANTS = new Set(['', 'us', 'usa', 'united states', 'united states of america']);
+
+    /** Returns true if member/metadata matches current location filter (country, region/state, city). */
+    function memberMatchesLocationFilter(meta, f) {
+      if (!meta) return false;
+      const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
+      if (!hasFilter) return true;
+      if (f.country && f.country.trim()) {
+        if (normLoc(meta.country) !== normLoc(f.country)) return false;
+      }
+      if (f.region && f.region.trim()) {
+        const regionVal = normLoc(f.region);
+        const metaRegion = normLoc(meta.region);
+        const metaState = normLoc(meta.state);
+        if (metaRegion !== regionVal && metaState !== regionVal) return false;
+        // When filtering by a US state (e.g. Arkansas), require country to be US or empty so we don't show "Arkansas, UK" etc.
+        if (regionVal && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
+      }
+      if (f.city && f.city.trim()) {
+        if (normLoc(meta.city) !== normLoc(f.city)) return false;
+      }
+      return true;
+    }
+
+    /** Apply location filter: set size to 0 for points that don't match country/region/city. Region filter matches both region and state (e.g. Arkansas in state). */
     function applyLocationFilter() {
-      if (!points || !points.geometry || !pointMetadata.length) return;
+      if (!points || !points.geometry) return;
       const sizes = points.geometry.attributes.size.array;
+      const count = points.geometry.attributes.position.count;
       const f = locationFilter;
       const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
-      for (let i = 0; i < pointMetadata.length; i++) {
+      for (let i = 0; i < count; i++) {
         const meta = pointMetadata[i];
-        let match = true;
-        if (hasFilter) {
-          if (f.country && f.country.trim()) {
-            if ((meta.country || '').trim().toLowerCase() !== (f.country || '').trim().toLowerCase()) match = false;
-          }
-          if (match && f.region && f.region.trim()) {
-            if ((meta.region || '').trim().toLowerCase() !== (f.region || '').trim().toLowerCase()) match = false;
-          }
-          if (match && f.city && f.city.trim()) {
-            if ((meta.city || '').trim().toLowerCase() !== (f.city || '').trim().toLowerCase()) match = false;
-          }
+        if (i >= pointMetadata.length) {
+          if (hasFilter) sizes[i] = 0;
+          continue;
         }
+        const match = memberMatchesLocationFilter(meta, f);
         const baseSize = sizeFromEngagement(meta.totalComments, meta.activity);
         sizes[i] = match ? baseSize : 0;
       }
@@ -4202,7 +4240,9 @@
           colors[existingIndex * 3 + 1] = color.g;
           colors[existingIndex * 3 + 2] = color.b;
 
-          sizes[existingIndex] = sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount);
+          const baseSize = sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount);
+          const match = memberMatchesLocationFilter(member, locationFilter);
+          sizes[existingIndex] = match ? baseSize : 0;
           activities[existingIndex] = Math.min(activity / 100, 1);
 
           // Update metadata — preserve existing profilePicture and position
@@ -4223,6 +4263,7 @@
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
             region: member.region ?? null,
+            state: member.state ?? null,
             city: member.city ?? null,
             country: member.country ?? null,
             cluster: 'Real Data',
@@ -4244,7 +4285,9 @@
           const color = getRiskColor(risk);
           newColors.push(color.r, color.g, color.b);
 
-          newSizes.push(sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount));
+          const baseSize = sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount);
+          const match = memberMatchesLocationFilter(member, locationFilter);
+          newSizes.push(match ? baseSize : 0);
           newActivities.push(Math.min(activity / 100, 1));
           newVertexIndices.push(nextIndex);
 
@@ -4261,6 +4304,7 @@
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
             region: member.region ?? null,
+            state: member.state ?? null,
             city: member.city ?? null,
             country: member.country ?? null,
             cluster: 'Real Data',
@@ -4431,6 +4475,7 @@
           activity:      actArr  ? +(actArr[i] || 0).toFixed(2) : 0,
           sobrietyDays:  m.sobrietyDays || 0,
           region:        m.region ?? null,
+          state:         m.state ?? null,
           city:          m.city ?? null,
           country:       m.country ?? null,
         });
@@ -4486,6 +4531,7 @@
           activity: m.activity,
           sobrietyDays: m.sobrietyDays || 0,
           region: m.region ?? null,
+          state: m.state ?? null,
           city: m.city ?? null,
           country: m.country ?? null,
         }));
@@ -4526,6 +4572,7 @@
       }
 
       toShow.forEach((m, i) => {
+        addLocationFromMember(m);
         const mx = getCoord(m, 'x');
         const my = getCoord(m, 'y');
         const mz = getCoord(m, 'z');
@@ -4557,6 +4604,7 @@
           totalComments:  m.totalComments ?? m.TotalComments ?? null,
           sobrietyDays:   m.sobrietyDays != null ? Number(m.sobrietyDays) : 0,
           region:         m.region ?? null,
+          state:          m.state ?? null,
           city:           m.city ?? null,
           country:        m.country ?? null,
           cluster:        'Snapshot',

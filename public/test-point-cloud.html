@@ -1332,6 +1332,7 @@
       <div class="detail-header-info">
         <h3 id="detail-username">-</h3>
         <div class="detail-header-id"><strong>ID:</strong> <span id="detail-id">-</span></div>
+        <div class="detail-header-location" style="margin-top: 6px; font-size: var(--font-size-sm); color: var(--color-text-secondary);"><strong>Location:</strong> <span id="detail-location">—</span></div>
       </div>
     </div>
 
@@ -1698,6 +1699,13 @@
         float camDist = length(mvPosition.xyz);
         vCamDist = camDist;
 
+        // Filtered-out points (location filter): size is 0 → don't draw at all
+        if (size < 0.001) {
+          gl_PointSize = 0.0;
+          gl_Position = projectionMatrix * mvPosition;
+          return;
+        }
+
         // Distance-based LOD
         // Far (250+): larger minimum so stars stay visible and bright from distance
         // Close (30-): boost for detail
@@ -1856,6 +1864,7 @@
           activity,
           sobrietyDays: Math.floor(Math.random() * 365),
           region: null,
+          state: null,
           city: null,
           country: null,
           cluster: `Cluster ${clusterId}`,
@@ -2190,25 +2199,44 @@
       return 2 + Math.log(1 + n) * 0.6;
     }
 
+    function normLoc(s) {
+      return String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+    const US_COUNTRY_VARIANTS = new Set(['', 'us', 'usa', 'united states', 'united states of america']);
+
+    function memberMatchesLocationFilter(meta, f) {
+      if (!meta) return false;
+      const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
+      if (!hasFilter) return true;
+      if (f.country && f.country.trim()) {
+        if (normLoc(meta.country) !== normLoc(f.country)) return false;
+      }
+      if (f.region && f.region.trim()) {
+        const regionVal = normLoc(f.region);
+        const metaRegion = normLoc(meta.region);
+        const metaState = normLoc(meta.state);
+        if (metaRegion !== regionVal && metaState !== regionVal) return false;
+        if (regionVal && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
+      }
+      if (f.city && f.city.trim()) {
+        if (normLoc(meta.city) !== normLoc(f.city)) return false;
+      }
+      return true;
+    }
+
     function applyLocationFilter() {
-      if (!points || !points.geometry || !pointMetadata.length) return;
+      if (!points || !points.geometry) return;
       const sizes = points.geometry.attributes.size.array;
+      const count = points.geometry.attributes.position.count;
       const f = locationFilter;
       const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
-      for (let i = 0; i < pointMetadata.length; i++) {
+      for (let i = 0; i < count; i++) {
         const meta = pointMetadata[i];
-        let match = true;
-        if (hasFilter) {
-          if (f.country && f.country.trim()) {
-            if ((meta.country || '').trim().toLowerCase() !== (f.country || '').trim().toLowerCase()) match = false;
-          }
-          if (match && f.region && f.region.trim()) {
-            if ((meta.region || '').trim().toLowerCase() !== (f.region || '').trim().toLowerCase()) match = false;
-          }
-          if (match && f.city && f.city.trim()) {
-            if ((meta.city || '').trim().toLowerCase() !== (f.city || '').trim().toLowerCase()) match = false;
-          }
+        if (i >= pointMetadata.length) {
+          if (hasFilter) sizes[i] = 0;
+          continue;
         }
+        const match = memberMatchesLocationFilter(meta, f);
         const baseSize = sizeFromEngagementForFilter(meta.totalComments, meta.activity);
         sizes[i] = match ? baseSize : 0;
       }
@@ -2539,6 +2567,9 @@
         ? `${metadata.sobrietyDays.toLocaleString()} days`
         : (metadata.sobrietyDate || metadata.sobriety ? '< 1 day' : 'Not set'));
 
+      const locationParts = [metadata.city, metadata.region || metadata.state, metadata.country].filter(Boolean).map(s => String(s).trim());
+      setDetail('detail-location', locationParts.length > 0 ? locationParts.join(', ') : '—');
+
       if (detailEl) detailEl.classList.add('visible');
       // Mobile bottom sheet: start at 1/3 height so user can scroll up for full details
       if (detailEl && window.innerWidth <= 768) {
@@ -2845,7 +2876,7 @@
           }),
           order: '-TotalComments',
           limit: '10',
-          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments,region,city,country'
+          keys: 'username,objectId,proPic,profilePicture,sobrietyDate,TotalComments,region,state,city,country'
         });
 
         const response = await fetch(`https://parseapi.back4app.com/classes/_User?${params}`, {
@@ -2882,6 +2913,7 @@
               riskLevel: 'medium',
               totalComments: member.TotalComments || 0,
               region: member.region ?? null,
+              state: member.state ?? null,
               city: member.city ?? null,
               country: member.country ?? null,
             },
@@ -3356,7 +3388,9 @@
         newColors[newIndex * 3 + 2] = 0;
       }
 
-      newSizes[newIndex] = 2 + Math.log(member.activity + 1) * 0.5;
+      const baseSize = 2 + Math.log(member.activity + 1) * 0.5;
+      const match = memberMatchesLocationFilter(member, locationFilter);
+      newSizes[newIndex] = match ? baseSize : 0;
       newActivities[newIndex] = Math.min(member.activity / 100, 1);
       newVertexIndices[newIndex] = newIndex;
 
@@ -3381,6 +3415,7 @@
         usernameToIndexMap.set(un, newIndex);
       }
 
+      applyLocationFilter();
       console.log(`Added ${member.username} at index ${newIndex}`);
       return newIndex;
     }
@@ -5075,9 +5110,11 @@
     };
 
     window.getLocationFilterOptions = () => {
+      if (window.__codecGetLocationOptions) return window.__codecGetLocationOptions();
       if (!pointMetadata || pointMetadata.length === 0) return { countries: [], regions: [], cities: [] };
       const countries = [...new Set(pointMetadata.map(m => (m.country || '').trim()).filter(Boolean))].sort();
-      const regions = [...new Set(pointMetadata.map(m => (m.region || '').trim()).filter(Boolean))].sort();
+      const regionAndState = pointMetadata.flatMap(m => [(m.region || '').trim(), (m.state || '').trim()].filter(Boolean));
+      const regions = [...new Set(regionAndState)].sort();
       const cities = [...new Set(pointMetadata.map(m => (m.city || '').trim()).filter(Boolean))].sort();
       return { countries, regions, cities };
     };
@@ -5090,6 +5127,49 @@
       };
       applyLocationFilter();
     };
+
+    // Wire location filter UI (vanilla HTML)
+    (function wireLocationFilter() {
+      const toggle = document.getElementById('location-filter-toggle');
+      const panel = document.getElementById('location-filter-panel');
+      const selCountry = document.getElementById('location-filter-country');
+      const selRegion = document.getElementById('location-filter-region');
+      const selCity = document.getElementById('location-filter-city');
+      const clearBtn = document.getElementById('location-filter-clear');
+      if (!toggle || !panel) return;
+      function populateOptions() {
+        const opts = window.getLocationFilterOptions ? window.getLocationFilterOptions() : { countries: [], regions: [], cities: [] };
+        function setOptions(sel, list) {
+          const cur = sel.value;
+          sel.innerHTML = '<option value="">All</option>' + (list || []).map(v => `<option value="${v}">${v}</option>`).join('');
+          if (list && list.includes(cur)) sel.value = cur;
+        }
+        setOptions(selCountry, opts.countries);
+        setOptions(selRegion, opts.regions);
+        setOptions(selCity, opts.cities);
+      }
+      toggle.addEventListener('click', () => {
+        const open = panel.style.display !== 'none';
+        panel.style.display = open ? 'none' : 'flex';
+        toggle.setAttribute('aria-expanded', !open);
+        if (!open) populateOptions();
+      });
+      function updateFilter() {
+        const country = selCountry.value || '';
+        const region = selRegion.value || '';
+        const city = selCity.value || '';
+        window.setLocationFilter({ country, region, city });
+        clearBtn.style.display = (country || region || city) ? '' : 'none';
+      }
+      selCountry.addEventListener('change', updateFilter);
+      selRegion.addEventListener('change', updateFilter);
+      selCity.addEventListener('change', updateFilter);
+      clearBtn.addEventListener('click', () => {
+        selCountry.value = ''; selRegion.value = ''; selCity.value = '';
+        window.setLocationFilter({});
+        clearBtn.style.display = 'none';
+      });
+    })();
 
     // Click outside to close admin sidebar
     function handleClickOutside(event) {
@@ -5248,7 +5328,9 @@
           colors[existingIndex * 3 + 1] = color.g;
           colors[existingIndex * 3 + 2] = color.b;
 
-          sizes[existingIndex] = 2 + Math.log(commentCount + 1) * 0.8;
+          const baseSize = 2 + Math.log(commentCount + 1) * 0.8;
+          const match = memberMatchesLocationFilter(member, locationFilter);
+          sizes[existingIndex] = match ? baseSize : 0;
           activities[existingIndex] = Math.min(activity / 100, 1);
 
           // Update metadata — preserve existing profilePicture and position
@@ -5268,6 +5350,7 @@
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
             region: member.region ?? null,
+            state: member.state ?? null,
             city: member.city ?? null,
             country: member.country ?? null,
             cluster: 'Real Data',
@@ -5288,7 +5371,9 @@
           const color = getRiskColor(risk);
           newColors.push(color.r, color.g, color.b);
 
-          newSizes.push(2 + Math.log(commentCount + 1) * 0.8);
+          const baseSize = 2 + Math.log(commentCount + 1) * 0.8;
+          const match = memberMatchesLocationFilter(member, locationFilter);
+          newSizes.push(match ? baseSize : 0);
           newActivities.push(Math.min(activity / 100, 1));
           newVertexIndices.push(nextIndex);
 
@@ -5304,6 +5389,7 @@
               ? Math.floor((Date.now() - new Date(member.sobriety).getTime()) / 86400000)
               : 0,
             region: member.region ?? null,
+            state: member.state ?? null,
             city: member.city ?? null,
             country: member.country ?? null,
             cluster: 'Real Data',
@@ -5472,6 +5558,7 @@
           activity:      actArr  ? +(actArr[i] || 0).toFixed(2) : 0,
           sobrietyDays:  m.sobrietyDays || 0,
           region:        m.region ?? null,
+          state:         m.state ?? null,
           city:          m.city ?? null,
           country:       m.country ?? null,
         });
@@ -5546,6 +5633,7 @@
             activity: m.activity,
             sobrietyDays: m.sobrietyDays || 0,
             region: m.region ?? null,
+            state: m.state ?? null,
             city: m.city ?? null,
             country: m.country ?? null,
           }));
@@ -5585,6 +5673,7 @@
       }
 
       members.forEach((m, i) => {
+        if (window.__codecAddLocation) window.__codecAddLocation(m);
         const mx = getCoord(m, 'x');
         const my = getCoord(m, 'y');
         const mz = getCoord(m, 'z');
@@ -5613,6 +5702,7 @@
           activity:       Number.isFinite(act) ? act : 0,
           sobrietyDays:   m.sobrietyDays != null ? Number(m.sobrietyDays) : 0,
           region:         m.region ?? null,
+          state:          m.state ?? null,
           city:           m.city ?? null,
           country:        m.country ?? null,
           cluster:        'Snapshot',
@@ -5777,6 +5867,8 @@
         const codecModule = await import('./lib/codec.js');
         const { feedFromBack4App, DEFAULT_CONFIG } = back4appModule;
         const { createState, evolve, DEFAULT_PARAMS } = codecModule;
+        window.__codecGetLocationOptions = codecModule.getLocationFilterOptions;
+        window.__codecAddLocation = codecModule.addLocationFromMember;
 
         updateJob(job.id, { message: 'Initializing state...', progress: 10 });
 
