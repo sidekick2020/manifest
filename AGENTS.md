@@ -9,7 +9,7 @@ This file is the **primary entry point for agents** building on or modifying thi
 - **Manifest**: 4D spacetime visualization of a recovery community — members as stars, posts as planets, Back4App as data source.
 - **Two app surfaces**:
   1. **Point Cloud (vanilla)** — `public/test-point-cloud.html`: single-file, self-contained Three.js app. **Source of truth** for the live product. Served as a static file at `/test-point-cloud.html` (no JS transform).
-  2. **React app** — `src/main.jsx` + `App.jsx`: training/dashboard UI (canvas 2D, octree, LOD). **Hash route** `/#point-cloud` renders the Point Cloud React shell (layout only; migration from the HTML is in progress).
+  2. **React app** — `src/main.jsx` + `App.jsx`: root `/` defaults to the Point Cloud React shell; `/#training` shows the training/dashboard UI (canvas 2D, octree, LOD).
 
 ---
 
@@ -17,7 +17,7 @@ This file is the **primary entry point for agents** building on or modifying thi
 
 | Goal | Entry / files |
 |------|----------------|
-| Run the app | `npm run dev`. Root `/` serves the React app (default = training/dashboard; `/#point-cloud` = React point-cloud shell). Vanilla point cloud at `http://localhost:5173/test-point-cloud.html`. |
+| Run the app | `npm run dev`. Root `/` serves the React app (default = React point-cloud shell). Use `/#training` for training/dashboard. Vanilla point cloud at `http://localhost:5173/test-point-cloud.html`. |
 | Change point-cloud UI or 3D behavior | `public/test-point-cloud.html` (vanilla) or `src/point-cloud/*` (React shell). |
 | Change training/dashboard React UI | `src/App.jsx`, `src/components/*`, `src/stores/*`. |
 | Change spatial layout algorithm | `lib/codec.js` (evolve, createState, DEFAULT_PARAMS). |
@@ -40,7 +40,7 @@ manifest-2/
 │   └── test-point-cloud.html  ← Point cloud app (vanilla, source of truth; served static)
 ├── index.html             ← React app entry (root #root)
 ├── src/
-│   ├── main.jsx           ← React entry; hash #point-cloud → PointCloudApp
+│   ├── main.jsx           ← React entry; / default → PointCloudApp; #training → App
 │   ├── App.jsx            ← Training/dashboard app (Scene, HUD, panels)
 │   ├── point-cloud/       ← React point-cloud shell (migration from HTML)
 │   ├── components/       ← React components (Scene, Stars, DetailPanel, …)

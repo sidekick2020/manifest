@@ -27,7 +27,7 @@ npm run dev
 
 Then open in your browser:
 
-- **`http://localhost:5174/`** — React app (training/dashboard by default; point-cloud shell at `/#point-cloud`)
+- **`http://localhost:5174/`** — React app (point-cloud by default; training/dashboard at `/#training`)
 - **`http://localhost:5174/test-point-cloud.html`** — Vanilla point cloud app (source of truth)
 
 > Default port is 5174. If it's taken, use `npm run dev -- --port <port>` or check the terminal for the URL.
