@@ -26,6 +26,7 @@ export function Scene() {
   const slicerRef = useRef(null);
   const sparklesRef = useRef([]); // Activity sparkles for visual feedback
   const lastCommentCountRef = useRef(0); // Track comment count changes
+  const prevFilterRef = useRef(''); // Track filter changes for position snap
 
   // Temporal slicing state - controls which time window to render
   const [sliceOptions, setSliceOptions] = useState({
@@ -417,6 +418,11 @@ export function Scene() {
         slicedMembers.forEach((m, id) => {
           if (memberMatchesLocationFilter(m, locationFilter)) {
             filteredMembers.set(id, m);
+          } else {
+            // Hide non-matching members immediately — zero out visual properties
+            // so they can't appear even if stale references exist
+            m.opacity = 0;
+            m.scale = 0;
           }
         });
       }
@@ -453,6 +459,17 @@ export function Scene() {
       // Fewer visible stars → tighter clustering; more stars → wider spread.
       const gravityScale = computeDynamicScale(memberCount);
 
+      // Detect filter changes — snap positions instantly when filter changes
+      const filterKey = `${locationFilter.country}|${locationFilter.region}|${locationFilter.city}`;
+      const filterChanged = filterKey !== prevFilterRef.current;
+      if (filterChanged) {
+        prevFilterRef.current = filterKey;
+        // Reset camera zoom so it adjusts to new cluster size
+        if (hasLocFilter) {
+          cam.userZoomed = false;
+        }
+      }
+
       // Compute centroid of target positions for visible members
       // (positions are scaled toward this point, keeping clusters centered)
       let centroidX = 0, centroidY = 0, centroidZ = 0, centroidN = 0;
@@ -470,11 +487,13 @@ export function Scene() {
       // Factors in dynamic gravity: compacted positions need a closer camera
       if (!dragRef.current.active && !cam.userZoomed) {
         const ideal = 50 + filteredMembers.size * 1.5 * gravityScale;
-        cam.td += (ideal - cam.td) * 0.01;
+        // Snap camera when filter changes, otherwise ease
+        const zoomRate = filterChanged ? 0.3 : 0.01;
+        cam.td += (ideal - cam.td) * zoomRate;
       }
 
       const now = performance.now();
-      if (now - lastTickTimeRef.current > tickInterval) {
+      if (now - lastTickTimeRef.current > tickInterval || filterChanged) {
         lastTickTimeRef.current = now;
 
         // OPTIMIZATION: Only update positions for filtered members (dramatic reduction!)
@@ -492,20 +511,18 @@ export function Scene() {
             z: centroidZ + (target.z - centroidZ) * gravityScale,
           };
 
-          // Simple animation for all sliced members (slice is already small!)
-          if (!m.position) {
+          // SNAP positions when filter changes — no lerp, instant jump
+          if (filterChanged || !m.position) {
             m.position = { x: scaledTarget.x, y: scaledTarget.y, z: scaledTarget.z };
-            m.opacity = 0;
-            m.scale = 0;
-          }
-
-          // CRITICAL FIX: Don't lerp the selected member while camera is focusing on it
-          // This prevents the "zoom to wrong place" bug where the member moves while camera zooms
-          const isSelected = selectedMember === id;
-          const isFocusing = cam.focusActive && isSelected;
-
-          if (!isFocusing) {
-            m.position = v3lerp(m.position, scaledTarget, 0.04);
+            if (!m.opacity) m.opacity = 0;
+            if (!m.scale) m.scale = 0;
+          } else {
+            // CRITICAL FIX: Don't lerp the selected member while camera is focusing on it
+            const isSelected = selectedMember === id;
+            const isFocusing = cam.focusActive && isSelected;
+            if (!isFocusing) {
+              m.position = v3lerp(m.position, scaledTarget, 0.04);
+            }
           }
           m.opacity = (m.opacity ?? 0) + (0.9 - (m.opacity ?? 0)) * 0.03;
           m.scale = (m.scale ?? 0) + (1 - (m.scale ?? 0)) * 0.04;
