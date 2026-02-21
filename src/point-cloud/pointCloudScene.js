@@ -4034,6 +4034,8 @@
         region:  (f && f.region)  ? String(f.region).trim()  : '',
         city:    (f && f.city)   ? String(f.city).trim()    : '',
       };
+      // Clear beams when filter changes — old beams may point to now-hidden stars
+      clearActiveConnectionLine();
       applyLocationFilter();
     };
 
@@ -4196,6 +4198,7 @@
     }
 
     /** Apply location filter: hide non-matching points AND reposition matching ones into a compact cluster.
+     *  Non-matching points are banished far off-screen so the raycaster can't hit them.
      *  When filter is cleared, restore original positions. */
     function applyLocationFilter() {
       if (!points || !points.geometry) return;
@@ -4216,26 +4219,50 @@
           positions[i] = _originalPositions[i];
         }
         _originalPositions = null;
+        // Restore all sizes
+        for (let i = 0; i < count; i++) {
+          const meta = pointMetadata[i];
+          if (i < pointMetadata.length) {
+            sizes[i] = sizeFromEngagement(meta.totalComments, meta.activity);
+          }
+        }
         points.geometry.attributes.position.needsUpdate = true;
+        points.geometry.attributes.size.needsUpdate = true;
+        points.geometry.computeBoundingSphere();
+        return;
       }
 
-      // First pass: set sizes and collect matching point indices + positions
+      // Collect matching indices and set sizes
       const matchingIndices = [];
       for (let i = 0; i < count; i++) {
         const meta = pointMetadata[i];
         if (i >= pointMetadata.length) {
-          if (hasFilter) sizes[i] = 0;
+          sizes[i] = 0;
+          if (hasFilter) {
+            positions[i * 3] = 1e7;
+            positions[i * 3 + 1] = 1e7;
+            positions[i * 3 + 2] = 1e7;
+          }
           continue;
         }
-        const match = memberMatchesLocationFilter(meta, f);
+        const match = hasFilter ? memberMatchesLocationFilter(meta, f) : true;
         const baseSize = sizeFromEngagement(meta.totalComments, meta.activity);
         sizes[i] = match ? baseSize : 0;
-        if (match && hasFilter) matchingIndices.push(i);
+
+        if (hasFilter) {
+          if (match) {
+            matchingIndices.push(i);
+          } else {
+            // Banish non-matching points far away so raycaster can't hit them
+            positions[i * 3] = 1e7;
+            positions[i * 3 + 1] = 1e7;
+            positions[i * 3 + 2] = 1e7;
+          }
+        }
       }
-      sizes.needsUpdate = true;
       points.geometry.attributes.size.needsUpdate = true;
 
-      // Second pass: reposition matching points into a compact cluster
+      // Reposition matching points into a compact cluster
       if (hasFilter && matchingIndices.length > 0 && _originalPositions) {
         // Compute centroid of matching points (from original positions)
         let cx = 0, cy = 0, cz = 0;
@@ -4261,12 +4288,32 @@
           positions[i * 3 + 1] = cy + (oy - cy) * scale;
           positions[i * 3 + 2] = cz + (oz - cz) * scale;
         }
-        points.geometry.attributes.position.needsUpdate = true;
 
         // Move camera to centroid of filtered cluster
         if (controls && controls.target) {
           controls.target.set(cx, cy, cz);
         }
+
+        // Set bounding sphere to cover ONLY visible points (not banished 1e7 ones)
+        // This makes raycaster broad-phase culling work correctly & efficiently
+        let maxR2 = 0;
+        for (const i of matchingIndices) {
+          const dx = positions[i * 3] - cx;
+          const dy = positions[i * 3 + 1] - cy;
+          const dz = positions[i * 3 + 2] - cz;
+          const r2 = dx * dx + dy * dy + dz * dz;
+          if (r2 > maxR2) maxR2 = r2;
+        }
+        points.geometry.boundingSphere = new THREE.Sphere(
+          new THREE.Vector3(cx, cy, cz),
+          Math.sqrt(maxR2) + 5 // small padding
+        );
+      }
+
+      points.geometry.attributes.position.needsUpdate = true;
+      if (!hasFilter || matchingIndices.length === 0) {
+        // Full recompute when no filter or no matches
+        points.geometry.computeBoundingSphere();
       }
     }
 
