@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { useUniverseStore } from '../stores/universeStore';
 import { useTrainingStore } from '../stores/trainingStore';
 import { usePredictionStore } from '../stores/predictionStore';
-import { seedToFloat, computeDynamicScale, memberMatchesLocationFilter } from '../../lib/codec.js';
+import { seedToFloat, computeTargetRadius, filterMembersByLocation } from '../../lib/codec.js';
 import { v3lerp } from '../../lib/vec3.js';
 import { Octree, getFrustumBounds } from '../../lib/octree.js';
 import { TemporalSlicer } from '../../lib/temporalSlicer.js';
@@ -400,128 +400,82 @@ export function Scene() {
         cam.tFocus.z += driftZ * 0.01;
       }
 
-      // CRITICAL OPTIMIZATION: Apply temporal slice FIRST, before any processing
-      // This limits ALL operations to only the current time window
-      const slicer = slicerRef.current;
-      const slicedMembers = slicer.slice(members, sliceOptions);
-      const sliceInfo = slicer.getSliceInfo(members, slicedMembers);
-
-      // LOCATION FILTER: After temporal slice, remove members that don't match
-      // the active location filter. This ensures beams, clicks, posts etc.
-      // only reference members in the filtered set.
+      // --- LOCATION FILTER (applied at codec level) ---
+      // The codec now encodes positions only for members matching the active
+      // location filter, so targetPos only contains entries for visible members.
+      // We use targetPos membership as the source of truth for visibility.
       const hasLocFilter = (locationFilter.country && locationFilter.country.trim()) ||
                            (locationFilter.region && locationFilter.region.trim()) ||
                            (locationFilter.city && locationFilter.city.trim());
-      let filteredMembers = slicedMembers;
-      if (hasLocFilter) {
-        filteredMembers = new Map();
-        slicedMembers.forEach((m, id) => {
-          if (memberMatchesLocationFilter(m, locationFilter)) {
-            filteredMembers.set(id, m);
-          } else {
-            // Hide non-matching members immediately — zero out visual properties
-            // so they can't appear even if stale references exist
-            m.opacity = 0;
-            m.scale = 0;
-          }
-        });
-      }
+
+      // Build visible members: only those with a position from the codec
+      const locationVisible = hasLocFilter
+        ? filterMembersByLocation(members, locationFilter)
+        : members;
+
+      // Apply temporal slice on the location-filtered set
+      const slicer = slicerRef.current;
+      const slicedMembers = slicer.slice(locationVisible, sliceOptions);
+      const sliceInfo = slicer.getSliceInfo(locationVisible, slicedMembers);
+
+      // Final filtered set: temporal-sliced subset of location-filtered members
+      // Only members with a targetPos can actually render
+      const filteredMembers = new Map();
+      slicedMembers.forEach((m, id) => {
+        if (targetPos.has(id)) filteredMembers.set(id, m);
+      });
 
       // Update filtered IDs ref so click handler can validate targets
       const fIds = filteredIdsRef.current;
       fIds.clear();
       filteredMembers.forEach((_, id) => fIds.add(id));
 
-      // DEBUG: Log slice results on first few frames
-      if (Math.floor(time * 10) % 100 === 0 && members.size > 0) {
-        console.log('[Scene] Slice debug:', {
-          totalMembers: members.size,
-          slicedMembers: slicedMembers.size,
-          filteredMembers: filteredMembers.size,
-          locationFilter: hasLocFilter ? locationFilter : 'none',
-          sliceMode: sliceOptions.mode,
-          windowSize: sliceOptions.windowSize,
-        });
-      }
-
       // Clear selection if the selected member is not in the filtered set
-      // (prevents stale beams/labels from a pre-filter selection)
-      if (hasLocFilter && selectedMember && !filteredMembers.has(selectedMember)) {
+      if (selectedMember && !filteredMembers.has(selectedMember)) {
         store.setSelectedMember(null, { zoom: false });
         store.setSelectedPost(null);
       }
 
-      // OPTIMIZATION: Adaptive throttle based on visible member count (not total!)
-      const memberCount = filteredMembers.size;
-      const tickInterval = memberCount > 1000 ? 66 : (memberCount > 500 ? 50 : 33);
-
-      // DYNAMIC GRAVITY: Scale positions based on visible star count.
-      // Fewer visible stars → tighter clustering; more stars → wider spread.
-      const gravityScale = computeDynamicScale(memberCount);
-
-      // Detect filter changes — snap positions instantly when filter changes
+      // Detect filter changes — snap camera when filter changes
       const filterKey = `${locationFilter.country}|${locationFilter.region}|${locationFilter.city}`;
       const filterChanged = filterKey !== prevFilterRef.current;
       if (filterChanged) {
         prevFilterRef.current = filterKey;
-        // Reset camera zoom so it adjusts to new cluster size
-        if (hasLocFilter) {
-          cam.userZoomed = false;
-        }
+        cam.userZoomed = false;
       }
 
-      // Compute centroid of target positions for visible members
-      // (positions are scaled toward this point, keeping clusters centered)
-      let centroidX = 0, centroidY = 0, centroidZ = 0, centroidN = 0;
-      filteredMembers.forEach((m, id) => {
-        const t = targetPos.get(id);
-        if (t) { centroidX += t.x; centroidY += t.y; centroidZ += t.z; centroidN++; }
-      });
-      if (centroidN > 0) {
-        centroidX /= centroidN;
-        centroidY /= centroidN;
-        centroidZ /= centroidN;
-      }
+      // OPTIMIZATION: Adaptive throttle based on visible member count
+      const memberCount = filteredMembers.size;
+      const tickInterval = memberCount > 1000 ? 66 : (memberCount > 500 ? 50 : 33);
 
-      // Auto-zoom (only when user hasn't manually zoomed)
-      // Factors in dynamic gravity: compacted positions need a closer camera
+      // Auto-zoom: use static target radius so camera distance matches universe size
       if (!dragRef.current.active && !cam.userZoomed) {
-        const ideal = 50 + filteredMembers.size * 1.5 * gravityScale;
-        // Snap camera when filter changes, otherwise ease
+        const targetR = computeTargetRadius(memberCount);
+        const ideal = Math.max(30, targetR * 0.7 + memberCount * 0.3);
         const zoomRate = filterChanged ? 0.3 : 0.01;
         cam.td += (ideal - cam.td) * zoomRate;
       }
 
+      // --- Position updates: lerp toward codec target positions ---
       const now = performance.now();
       if (now - lastTickTimeRef.current > tickInterval || filterChanged) {
         lastTickTimeRef.current = now;
-
-        // OPTIMIZATION: Only update positions for filtered members (dramatic reduction!)
-        const cullDistance = cam.d * 3;
-        const focusPos = cam.focus;
 
         filteredMembers.forEach((m, id) => {
           const target = targetPos.get(id);
           if (!target) return;
 
-          // Dynamic gravity: scale position toward visible-member centroid
-          const scaledTarget = {
-            x: centroidX + (target.x - centroidX) * gravityScale,
-            y: centroidY + (target.y - centroidY) * gravityScale,
-            z: centroidZ + (target.z - centroidZ) * gravityScale,
-          };
-
-          // SNAP positions when filter changes — no lerp, instant jump
           if (filterChanged || !m.position) {
-            m.position = { x: scaledTarget.x, y: scaledTarget.y, z: scaledTarget.z };
+            // Snap instantly on filter change or first appearance
+            m.position = { x: target.x, y: target.y, z: target.z };
             if (!m.opacity) m.opacity = 0;
             if (!m.scale) m.scale = 0;
           } else {
-            // CRITICAL FIX: Don't lerp the selected member while camera is focusing on it
+            // Smooth lerp to target (skip selected member while camera focuses)
             const isSelected = selectedMember === id;
             const isFocusing = cam.focusActive && isSelected;
             if (!isFocusing) {
-              m.position = v3lerp(m.position, scaledTarget, 0.04);
+              m.position = v3lerp(m.position, target, 0.04);
             }
           }
           m.opacity = (m.opacity ?? 0) + (0.9 - (m.opacity ?? 0)) * 0.03;
@@ -594,7 +548,7 @@ export function Scene() {
           sliceMode: sliceInfo.mode,
           percentageShown: sliceInfo.percentage + '%',
           withPositions: memberPositions.length,
-          gravityScale: gravityScale.toFixed(3),
+          targetRadius: computeTargetRadius(filteredMembers.size).toFixed(1),
         });
       }
 
@@ -826,7 +780,7 @@ export function Scene() {
         const visibleCount = visibleItems ? visibleItems.length : 0;
         const slicePercent = members.size > 0 ? Math.round((filteredMembers.size / members.size) * 100) : 0;
         const culledPercent = filteredMembers.size > 0 ? Math.round((1 - visibleCount / filteredMembers.size) * 100) : 0;
-        console.log(`[Scene] Total: ${members.size}, Filtered: ${filteredMembers.size} (${slicePercent}%), Visible: ${visibleCount} (culled ${culledPercent}%), gravity: ${gravityScale.toFixed(2)}`);
+        console.log(`[Scene] Total: ${members.size}, Filtered: ${filteredMembers.size} (${slicePercent}%), Visible: ${visibleCount} (culled ${culledPercent}%), radius: ${computeTargetRadius(filteredMembers.size).toFixed(1)}`);
       }
 
       for (const item of items) {

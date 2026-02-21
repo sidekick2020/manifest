@@ -3,7 +3,7 @@
  * Manages graph-optimal positions, error metrics, param tuning, and visual overlays.
  */
 import { create } from 'zustand';
-import { DEFAULT_PARAMS } from '../../lib/codec.js';
+import { DEFAULT_PARAMS, filterMembersByLocation, buildFilteredState } from '../../lib/codec.js';
 import { computeGraphOptimal } from '../../lib/graphOptimal.js';
 import { computePredictionError, generateSnapshot, tuneParams } from '../../lib/hashTrainer.js';
 import { useUniverseStore } from './universeStore.js';
@@ -55,9 +55,19 @@ export const useTrainingStore = create((set, get) => ({
     const universe = useUniverseStore.getState();
     if (universe.members.size === 0) return;
 
+    // Use filtered subset so training targets match the visible universe
+    const locFilter = universe.locationFilter;
+    const activeMembers = filterMembersByLocation(universe.members, locFilter);
+    const filteredState = (activeMembers === universe.members)
+      ? { members: universe.members, comments: universe.comments }
+      : buildFilteredState(
+          { members: universe.members, posts: universe.posts, comments: universe.comments },
+          activeMembers
+        );
+
     const result = computeGraphOptimal({
-      members: universe.members,
-      comments: universe.comments,
+      members: filteredState.members,
+      comments: filteredState.comments,
     });
     set({ optimalPositions: result.positions });
 
@@ -100,11 +110,17 @@ export const useTrainingStore = create((set, get) => ({
     const universe = useUniverseStore.getState();
     if (universe.members.size < 3) return;
 
-    const state = {
+    // Train on filtered subset so tuned params optimize for the visible universe
+    const locFilter = universe.locationFilter;
+    const activeMembers = filterMembersByLocation(universe.members, locFilter);
+    const fullState = {
       members: universe.members,
       posts: universe.posts,
       comments: universe.comments,
     };
+    const state = (activeMembers === universe.members)
+      ? fullState
+      : buildFilteredState(fullState, activeMembers);
 
     const result = tuneParams(state, codecParams, { perturbScale: 0.15, sessionsPerTest: 8 });
     set({ codecParams: result.params });

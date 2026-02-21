@@ -4,7 +4,7 @@
  * Maps are mutated in place; `version` counter triggers re-renders.
  */
 import { create } from 'zustand';
-import { createState, evolve, getTemp, DEFAULT_PARAMS } from '../../lib/codec.js';
+import { createState, evolve, getTemp, DEFAULT_PARAMS, filterMembersByLocation, computeTargetRadius, encodeWithSeed, buildFilteredState, buildIndexes, getClusterStructure, computeNeighborhoodsFromStructure } from '../../lib/codec.js';
 import { feedFromBack4App, DEFAULT_CONFIG } from '../../lib/back4app.js';
 import { v3lerp } from '../../lib/vec3.js';
 
@@ -140,38 +140,55 @@ export const useUniverseStore = create((set, get) => {
         // Evolve if we have data (skip during animation freeze)
         if (s.members.size > 0 && s.animationEnabled) {
           const codecState = get()._codecState();
+          const locFilter = get().locationFilter;
 
-          // CRITICAL OPTIMIZATION: Skip expensive evolution for large datasets
+          // Filter members by location — codec trains on exactly the visible subset
+          const activeMembers = filterMembersByLocation(s.members, locFilter);
+
+          // CRITICAL OPTIMIZATION: Skip expensive evolution for large filtered datasets
           // Use simple deterministic positioning instead
-          if (s.members.size > 800) {
+          if (activeMembers.size > 800) {
             // Simple sphere positioning for large datasets (instant, no computation)
-            s.members.forEach((m, id) => {
-              if (!s.targetPos.has(id)) {
-                // Deterministic position based on member ID
-                const hash = id.split('').reduce((a, b) => ((a << 5) - a + b.charCodeAt(0)) | 0, 0);
-                const t = Math.abs(hash) / 2147483647;
-                const phi = t * Math.PI * 2;
-                const theta = Math.acos(2 * ((hash >>> 16) / 65535) - 1);
-                const r = 80 + (Math.abs(hash) % 40); // Radius 80-120
+            // Use static star spacing so universe radius scales with member count
+            const targetR = computeTargetRadius(activeMembers.size, params);
+            const newTargetPos = new Map();
+            activeMembers.forEach((m, id) => {
+              // Deterministic position based on member ID
+              const hash = id.split('').reduce((a, b) => ((a << 5) - a + b.charCodeAt(0)) | 0, 0);
+              const t = Math.abs(hash) / 2147483647;
+              const phi = t * Math.PI * 2;
+              const theta = Math.acos(2 * ((hash >>> 16) / 65535) - 1);
+              const r = targetR * (0.6 + (Math.abs(hash) % 100) / 250); // 60-100% of target radius
 
-                s.targetPos.set(id, {
-                  x: r * Math.sin(theta) * Math.cos(phi),
-                  y: r * Math.sin(theta) * Math.sin(phi),
-                  z: r * Math.cos(theta)
-                });
-              }
+              newTargetPos.set(id, {
+                x: r * Math.sin(theta) * Math.cos(phi),
+                y: r * Math.sin(theta) * Math.sin(phi),
+                z: r * Math.cos(theta)
+              });
             });
 
-            set({ version: get().version + 1 });
+            // Hide members outside the filter
+            if (activeMembers !== s.members) {
+              s.members.forEach((m, id) => {
+                if (!activeMembers.has(id)) {
+                  m.opacity = 0;
+                  m.scale = 0;
+                }
+              });
+            }
+
+            codecState.targetPos = newTargetPos;
+            set({ targetPos: newTargetPos, version: get().version + 1 });
           } else {
-            // Use normal evolution for smaller datasets
+            // Use normal evolution for smaller datasets — pass filter so codec
+            // builds neighborhoods and computes cohesion on filtered subset only
             let predictions = null;
             if (_getPredictionStore) {
               const predStore = _getPredictionStore();
               predictions = predStore.active ? predStore.predictions : null;
             }
 
-            const result = evolve(codecState, params, predictions);
+            const result = evolve(codecState, params, predictions, locFilter);
 
             set({
               sessionCount: codecState.sessionCount,
@@ -195,13 +212,14 @@ export const useUniverseStore = create((set, get) => {
 
     runEvolve(params = DEFAULT_PARAMS) {
       const codecState = get()._codecState();
+      const locFilter = get().locationFilter;
       // Get predictions from predictionStore if active (lazy to avoid circular import)
       let predictions = null;
       if (_getPredictionStore) {
         const predStore = _getPredictionStore();
         predictions = predStore.active ? predStore.predictions : null;
       }
-      const result = evolve(codecState, params, predictions);
+      const result = evolve(codecState, params, predictions, locFilter);
       const s = get();
       set({
         sessionCount: codecState.sessionCount,
@@ -276,7 +294,89 @@ export const useUniverseStore = create((set, get) => {
     },
 
     setLocationFilter(filter) {
-      set({ locationFilter: { ...filter }, version: get().version + 1 });
+      const s = get();
+      const newFilter = { ...filter };
+      set({ locationFilter: newFilter });
+
+      // Immediately re-encode positions for the new filtered subset.
+      // This ensures the universe resizes with static star spacing and the
+      // codec trains on exactly the visible members.
+      if (s.members.size === 0) {
+        set({ version: s.version + 1 });
+        return;
+      }
+
+      const activeMembers = filterMembersByLocation(s.members, newFilter);
+
+      if (activeMembers.size === 0) {
+        // No members match — clear positions
+        set({ targetPos: new Map(), version: s.version + 1 });
+        return;
+      }
+
+      // For large filtered sets, use simple sphere positioning
+      if (activeMembers.size > 800) {
+        const targetR = computeTargetRadius(activeMembers.size);
+        const newTargetPos = new Map();
+        activeMembers.forEach((m, id) => {
+          const hash = id.split('').reduce((a, b) => ((a << 5) - a + b.charCodeAt(0)) | 0, 0);
+          const t = Math.abs(hash) / 2147483647;
+          const phi = t * Math.PI * 2;
+          const theta = Math.acos(2 * ((hash >>> 16) / 65535) - 1);
+          const r = targetR * (0.6 + (Math.abs(hash) % 100) / 250);
+          newTargetPos.set(id, {
+            x: r * Math.sin(theta) * Math.cos(phi),
+            y: r * Math.sin(theta) * Math.sin(phi),
+            z: r * Math.cos(theta)
+          });
+          m.position = newTargetPos.get(id);
+          m.opacity = m.opacity ?? 0;
+          m.scale = m.scale ?? 0;
+        });
+
+        // Hide non-matching members
+        if (activeMembers !== s.members) {
+          s.members.forEach((m, id) => {
+            if (!activeMembers.has(id)) { m.opacity = 0; m.scale = 0; }
+          });
+        }
+        set({ targetPos: newTargetPos, version: s.version + 1 });
+        return;
+      }
+
+      // For smaller sets: run a full encode pass with the filtered state
+      const codecState = get()._codecState();
+      const filteredState = buildFilteredState(codecState, activeMembers);
+      const indexes = buildIndexes(filteredState);
+      const clusterStructure = getClusterStructure(filteredState);
+      const seed = codecState.masterSeed || 0;
+      const nhs = computeNeighborhoodsFromStructure(seed, filteredState, clusterStructure, indexes);
+      const result = encodeWithSeed(seed, filteredState, DEFAULT_PARAMS, null, nhs, indexes);
+
+      // Snap members to new positions immediately
+      activeMembers.forEach((m, id) => {
+        const t = result.positions.get(id);
+        if (t) {
+          m.position = { x: t.x, y: t.y, z: t.z };
+          m.opacity = m.opacity ?? 0;
+          m.scale = m.scale ?? 0;
+        }
+      });
+
+      // Hide non-matching members
+      if (activeMembers !== s.members) {
+        s.members.forEach((m, id) => {
+          if (!activeMembers.has(id)) { m.opacity = 0; m.scale = 0; }
+        });
+      }
+
+      codecState.targetPos = result.positions;
+      codecState.neighborhoods = nhs;
+      set({
+        targetPos: result.positions,
+        neighborhoods: nhs,
+        version: s.version + 1,
+      });
     },
 
     reset() {

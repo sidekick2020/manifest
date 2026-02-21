@@ -183,6 +183,12 @@ button.active {
   font-weight: var(--font-weight-medium);
   margin-left: 4px;
 }
+.location-filter-count {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-normal);
+  margin-left: 2px;
+}
 .location-filter-panel {
   margin-top: 8px;
   padding: 12px 14px;

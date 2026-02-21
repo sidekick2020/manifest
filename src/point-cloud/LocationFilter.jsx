@@ -1,69 +1,60 @@
 /**
- * Location filter: region, city, country. Hides points that don't match.
+ * Cascading location filter: Country → Region/State → City.
+ *
+ * Options are built dynamically from loaded members so the dropdowns only
+ * show locations that actually exist in the dataset. Selecting a country
+ * narrows the available regions; selecting a region narrows the available
+ * cities. Clearing a parent level also clears its children.
+ *
+ * Static fallback lists (from locationData.js) are merged with live data
+ * so the UI is usable even before the first back4app feed completes.
  */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useUniverseStore } from '../stores/universeStore';
+import { memberMatchesLocationFilter, normalizeRegion } from '../../lib/codec.js';
+import { STATIC_COUNTRIES, STATIC_REGIONS, STATIC_CITIES } from './locationData.js';
 
-const COUNTRIES = [
-  'Algeria','Argentina','Australia','Austria','Belgium','Belize','Bolivia',
-  'Bosnia and Herzegovina','Botswana','Brazil','Canada','Chile','Colombia',
-  'Congo Republic','Costa Rica','Croatia','Curacao','Cyprus','Czechia','Denmark',
-  'Ecuador','Egypt','El Salvador','Estonia','Eswatini','Ethiopia','Finland',
-  'France','Germany','Ghana','Greece','Guam','Honduras','Hong Kong','Hungary',
-  'Iceland','India','Iran','Iraq','Ireland','Israel','Italy','Jamaica','Japan',
-  'Kazakhstan','Kenya','Latvia','Lithuania','Malawi','Malaysia','Maldives',
-  'Mexico','Mongolia','Nepal','Netherlands','New Zealand','Nigeria','Pakistan',
-  'Peru','Philippines','Poland','Portugal','Puerto Rico','Qatar','Romania',
-  'Slovakia','Slovenia','South Africa','Spain','Suriname','Sweden','Switzerland',
-  'Tanzania','Thailand','Trinidad and Tobago','Turkey','Ukraine',
-  'United Arab Emirates','United Kingdom','United States','Venezuela','Vietnam',
-  'Zambia','Zimbabwe',
-];
+/**
+ * Scan all loaded members and build location option maps.
+ * Returns { countries, regionsByCountry, citiesByCountryRegion }.
+ */
+function buildLocationIndex(members) {
+  // country → Set<region>
+  const regionsByCountry = new Map();
+  // "country|region" → Set<city>
+  const citiesByCountryRegion = new Map();
+  // All unique values
+  const countries = new Set();
 
-const REGIONS = [
-  'Alabama','Alaska','Alberta','Arizona','Arkansas','California','Colorado',
-  'Connecticut','Delaware','District of Columbia','Florida','Georgia','Hawaii',
-  'Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine',
-  'Manitoba','Maryland','Massachusetts','Michigan','Minnesota','Mississippi',
-  'Missouri','Montana','Nebraska','Nevada','New Brunswick','New Hampshire',
-  'New Jersey','New Mexico','New York','North Carolina','North Dakota',
-  'Newfoundland and Labrador','Nova Scotia','Ohio','Oklahoma','Ontario','Oregon',
-  'Pennsylvania','Prince Edward Island','Quebec','Rhode Island','Saskatchewan',
-  'South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia',
-  'Washington','West Virginia','Wisconsin','Wyoming',
-  'British Columbia','Northwest Territories','Nunavut','Yukon',
-  'England','Scotland','Wales','Northern Ireland',
-  'New South Wales','Queensland','South Australia','Tasmania','Victoria',
-  'Western Australia','Northern Territory','Australian Capital Territory',
-  'Auckland','Canterbury','Wellington Region','Bay of Plenty','Waikato Region',
-  'Andalusia','Catalonia','Madrid','Valencia','Basque Country',
-  'Bavaria','Berlin','Hamburg','North Rhine-Westphalia',
-  'Ile-de-France','Brittany',
-  'Lombardy','Lazio','Emilia-Romagna',
-  'Buenos Aires','Cordoba','Santa Fe',
-  'Bogota D.C.','Antioquia','Valle del Cauca Department',
-  'Mexico City','Jalisco','Nuevo Leon',
-  'Sao Paulo','Rio Negro','Bahia',
-  'Gauteng','Western Cape','KwaZulu-Natal',
-  'Lagos','Rivers State',
-  'Nairobi County',
-];
+  members.forEach((m) => {
+    const co = (m.country || '').trim();
+    const rg = (m.region || m.state || '').trim();
+    const ci = (m.city || '').trim();
 
-const CITIES = [
-  'Albuquerque','Anaheim','Arlington','Atlanta','Auckland','Bakersfield',
-  'Bangkok','Baton Rouge','Boca Raton','Boston','Brooklyn','Buenos Aires',
-  'Calgary','Charlotte','Chicago','Christchurch','Columbus','Dallas','Denver',
-  'Durham','Edmonton','El Paso','Eugene','Fairbanks','Fargo','Flint',
-  'Fort Worth','Fresno','Glasgow','Grand Rapids','Hartford','Houston',
-  'Indianapolis','Kansas City','Lagos','Lancaster','Las Vegas','Leeds',
-  'Liverpool','London','Los Angeles','Louisville','Manchester','Melbourne',
-  'Memphis','Miami','Milwaukee','Minneapolis','Missoula','Mobile','Montreal',
-  'New York','Norfolk','Oakland','Oklahoma City','Orlando','Philadelphia',
-  'Phoenix','Pittsburgh','Portland','Raleigh','Regina','Richmond','Salem',
-  'San Antonio','San Bernardino','San Francisco','Santa Rosa','Seattle',
-  'Sheffield','Singapore','Springfield','St Louis','Sydney','Tampa','Toronto',
-  'Tucson','Vancouver','Virginia Beach','Washington','Wilmington','Winnipeg',
-];
+    if (co) {
+      countries.add(co);
+      if (!regionsByCountry.has(co)) regionsByCountry.set(co, new Set());
+      if (rg) regionsByCountry.get(co).add(rg);
+    }
+
+    const regionKey = `${co}|${rg}`;
+    if (!citiesByCountryRegion.has(regionKey)) citiesByCountryRegion.set(regionKey, new Set());
+    if (ci) citiesByCountryRegion.get(regionKey).add(ci);
+  });
+
+  return { countries, regionsByCountry, citiesByCountryRegion };
+}
+
+/**
+ * Get the count of members matching a partial filter.
+ */
+function countMatching(members, filter) {
+  let n = 0;
+  members.forEach((m) => {
+    if (memberMatchesLocationFilter(m, filter)) n++;
+  });
+  return n;
+}
 
 export function LocationFilter() {
   const [expanded, setExpanded] = useState(false);
@@ -71,6 +62,78 @@ export function LocationFilter() {
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
   const storeSetFilter = useUniverseStore((s) => s.setLocationFilter);
+  const members = useUniverseStore((s) => s.members);
+  const version = useUniverseStore((s) => s.version);
+
+  // Build location index from loaded members (re-computed when version changes)
+  const locationIndex = useMemo(() => {
+    return buildLocationIndex(members);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [members, version]);
+
+  // --- Cascading options ---
+
+  // Countries: merge live data with static fallback, sorted
+  const countryOptions = useMemo(() => {
+    const set = new Set([...locationIndex.countries, ...STATIC_COUNTRIES]);
+    return [...set].sort();
+  }, [locationIndex]);
+
+  // Regions: if a country is selected, only show regions for that country.
+  // Otherwise show all known regions.
+  const regionOptions = useMemo(() => {
+    if (country) {
+      const liveRegions = locationIndex.regionsByCountry.get(country);
+      const regions = liveRegions ? [...liveRegions] : [];
+      // Also include static regions that conceptually belong to this country
+      // (e.g., US states when "United States" is selected)
+      STATIC_REGIONS.forEach((r) => {
+        // Check if any member in this country has this region
+        if (!regions.includes(r)) {
+          const norm = normalizeRegion(r);
+          const liveNorms = regions.map(normalizeRegion);
+          if (!liveNorms.includes(norm)) {
+            // Only add if at least one member has this region+country combo
+            // Skip to avoid showing irrelevant static entries
+          }
+        }
+      });
+      return regions.sort();
+    }
+    const set = new Set();
+    locationIndex.regionsByCountry.forEach((regions) => {
+      regions.forEach((r) => set.add(r));
+    });
+    STATIC_REGIONS.forEach((r) => set.add(r));
+    return [...set].sort();
+  }, [country, locationIndex]);
+
+  // Cities: if country/region selected, only show cities for that scope.
+  const cityOptions = useMemo(() => {
+    if (country || region) {
+      const cities = new Set();
+      locationIndex.citiesByCountryRegion.forEach((citySet, key) => {
+        const [co, rg] = key.split('|');
+        if (country && co !== country) return;
+        if (region && normalizeRegion(rg) !== normalizeRegion(region)) return;
+        citySet.forEach((c) => cities.add(c));
+      });
+      return [...cities].sort();
+    }
+    const set = new Set();
+    locationIndex.citiesByCountryRegion.forEach((citySet) => {
+      citySet.forEach((c) => set.add(c));
+    });
+    STATIC_CITIES.forEach((c) => set.add(c));
+    return [...set].sort();
+  }, [country, region, locationIndex]);
+
+  // Count of members matching current filter
+  const matchCount = useMemo(() => {
+    const hasFilter = country || region || city;
+    if (!hasFilter || members.size === 0) return null;
+    return countMatching(members, { country, region, city });
+  }, [country, region, city, members, version]);
 
   const apply = (c, r, ci) => {
     const filter = { country: c, region: r, city: ci };
@@ -80,9 +143,28 @@ export function LocationFilter() {
     }
   };
 
-  const handleCountry = (e) => { const v = e.target.value || ''; setCountry(v); apply(v, region, city); };
-  const handleRegion = (e) => { const v = e.target.value || ''; setRegion(v); apply(country, v, city); };
-  const handleCity = (e) => { const v = e.target.value || ''; setCity(v); apply(country, region, v); };
+  const handleCountry = (e) => {
+    const v = e.target.value || '';
+    setCountry(v);
+    // Clear child selections when parent changes
+    setRegion('');
+    setCity('');
+    apply(v, '', '');
+  };
+
+  const handleRegion = (e) => {
+    const v = e.target.value || '';
+    setRegion(v);
+    // Clear city when region changes
+    setCity('');
+    apply(country, v, '');
+  };
+
+  const handleCity = (e) => {
+    const v = e.target.value || '';
+    setCity(v);
+    apply(country, region, v);
+  };
 
   const clearFilters = () => {
     setCountry('');
@@ -104,6 +186,9 @@ export function LocationFilter() {
       >
         Filter by location
         {hasFilter && <span className="location-filter-badge"> on</span>}
+        {hasFilter && matchCount !== null && (
+          <span className="location-filter-count"> ({matchCount})</span>
+        )}
       </button>
       {expanded && (
         <div id="location-filter-panel" className="location-filter-panel" role="region" aria-label="Location filters">
@@ -111,21 +196,21 @@ export function LocationFilter() {
             Country
             <select value={country} onChange={handleCountry} aria-label="Filter by country">
               <option value="">All</option>
-              {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
           <label className="location-filter-label">
             Region / State
             <select value={region} onChange={handleRegion} aria-label="Filter by region">
               <option value="">All</option>
-              {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              {regionOptions.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           </label>
           <label className="location-filter-label">
             City
             <select value={city} onChange={handleCity} aria-label="Filter by city">
               <option value="">All</option>
-              {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {cityOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
           {hasFilter && (
