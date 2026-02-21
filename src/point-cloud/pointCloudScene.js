@@ -228,8 +228,7 @@
     let selectedMemberIndex = null;
     /** Location filter: { country, region, city }. Empty string = no filter for that field. */
     let locationFilter = { country: '', region: '', city: '' };
-    /** Original positions before location filter repositioning (saved to restore on clear) */
-    let _originalPositions = null;
+    // _originalPositions removed — pointMetadata[i].position is the source of truth for original positions
     // True when page loaded with a user in URL — we show loading screen and do God-view fly-in when ready
     let _initialUrlUserPending = false;
     let _loadingScreenShownAt = 0;
@@ -646,16 +645,18 @@
       // Otherwise check member stars
       const intersects = raycaster.intersectObject(points);
 
-      // CRITICAL: Skip invisible (size=0) points — location filter hides points
-      // by setting size to 0, but raycaster still intersects them.
-      // Find the first intersection that has a visible (non-zero) size.
+      // Skip hidden/non-matching points: check size > 0 AND re-verify location filter.
+      // Belt-and-suspenders: even if banishing (1e7) or size-zeroing missed a point
+      // (e.g. enrichment race), the filter re-check catches it.
       const sizes = points.geometry.attributes.size.array;
+      const f = locationFilter;
+      const hasLocFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
       for (let i = 0; i < intersects.length; i++) {
         const idx = intersects[i].index;
-        if (sizes[idx] > 0) {
-          flashPoint(idx);
-          return;
-        }
+        if (sizes[idx] <= 0) continue;
+        if (hasLocFilter && idx < pointMetadata.length && !memberMatchesLocationFilter(pointMetadata[idx], f)) continue;
+        flashPoint(idx);
+        return;
       }
     }
 
@@ -983,7 +984,7 @@
       memberIndexMap.set(id, nextIndex);
       loadedMemberIds.add(id);
       syncUsernameToIndexMap();
-      _originalPositions = null; // Geometry changed — re-snapshot on next filter apply
+      // (metadata positions are the source of truth — no position snapshot needed)
       applyLocationFilter();
       await loadPostsAndCommentsForUser(id);
       return nextIndex;
@@ -2127,7 +2128,7 @@
       // Register in memberIndexMap so planets orbit at the right position
       memberIndexMap.set(member.id, newIndex);
 
-      _originalPositions = null; // Geometry changed — re-snapshot on next filter apply
+      // (metadata positions are the source of truth — no position snapshot needed)
       applyLocationFilter();
       loadedMemberIds.add(member.id);
       const un = (member.username && String(member.username).trim()) ? String(member.username).trim().toLowerCase() : '';
@@ -4198,8 +4199,9 @@
     }
 
     /** Apply location filter: hide non-matching points AND reposition matching ones into a compact cluster.
-     *  Non-matching points are banished far off-screen so the raycaster can't hit them.
-     *  When filter is cleared, restore original positions. */
+     *  Non-matching points are banished to (1e7,1e7,1e7) so the raycaster can't hit them.
+     *  Uses pointMetadata[i].position as the source of truth for original positions — immune
+     *  to corruption from enrichment cycles (unlike the old _originalPositions approach). */
     function applyLocationFilter() {
       if (!points || !points.geometry) return;
       const positions = points.geometry.attributes.position.array;
@@ -4208,68 +4210,49 @@
       const f = locationFilter;
       const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
 
-      // Save original positions on first filter application
-      if (hasFilter && !_originalPositions) {
-        _originalPositions = new Float32Array(positions);
-      }
-
-      // Restore original positions when filter is cleared
-      if (!hasFilter && _originalPositions) {
-        for (let i = 0; i < _originalPositions.length; i++) {
-          positions[i] = _originalPositions[i];
-        }
-        _originalPositions = null;
-        // Restore all sizes
-        for (let i = 0; i < count; i++) {
-          const meta = pointMetadata[i];
-          if (i < pointMetadata.length) {
-            sizes[i] = sizeFromEngagement(meta.totalComments, meta.activity);
-          }
-        }
-        points.geometry.attributes.position.needsUpdate = true;
-        points.geometry.attributes.size.needsUpdate = true;
-        points.geometry.computeBoundingSphere();
-        return;
-      }
-
-      // Collect matching indices and set sizes
+      // Pass 1: restore original positions from metadata, set sizes, collect matching indices
       const matchingIndices = [];
       for (let i = 0; i < count; i++) {
         const meta = pointMetadata[i];
-        if (i >= pointMetadata.length) {
+        if (!meta || i >= pointMetadata.length) {
           sizes[i] = 0;
-          if (hasFilter) {
-            positions[i * 3] = 1e7;
-            positions[i * 3 + 1] = 1e7;
-            positions[i * 3 + 2] = 1e7;
-          }
+          positions[i * 3] = 1e7;
+          positions[i * 3 + 1] = 1e7;
+          positions[i * 3 + 2] = 1e7;
           continue;
         }
+
         const match = hasFilter ? memberMatchesLocationFilter(meta, f) : true;
         const baseSize = sizeFromEngagement(meta.totalComments, meta.activity);
-        sizes[i] = match ? baseSize : 0;
 
-        if (hasFilter) {
-          if (match) {
-            matchingIndices.push(i);
-          } else {
-            // Banish non-matching points far away so raycaster can't hit them
-            positions[i * 3] = 1e7;
-            positions[i * 3 + 1] = 1e7;
-            positions[i * 3 + 2] = 1e7;
+        if (match) {
+          sizes[i] = baseSize;
+          // Always restore to original position from metadata (source of truth)
+          const op = meta.position;
+          if (op && typeof op.x === 'number') {
+            positions[i * 3]     = op.x;
+            positions[i * 3 + 1] = op.y;
+            positions[i * 3 + 2] = op.z;
           }
+          if (hasFilter) matchingIndices.push(i);
+        } else {
+          sizes[i] = 0;
+          // Banish non-matching points far away so raycaster can't intersect them
+          positions[i * 3] = 1e7;
+          positions[i * 3 + 1] = 1e7;
+          positions[i * 3 + 2] = 1e7;
         }
       }
       points.geometry.attributes.size.needsUpdate = true;
 
-      // Reposition matching points into a compact cluster
-      if (hasFilter && matchingIndices.length > 0 && _originalPositions) {
-        // Compute centroid of matching points (from original positions)
+      // Pass 2: compact matching points into a tight cluster around their centroid
+      if (hasFilter && matchingIndices.length > 0) {
+        // Centroid from restored original positions
         let cx = 0, cy = 0, cz = 0;
         for (const i of matchingIndices) {
-          cx += _originalPositions[i * 3];
-          cy += _originalPositions[i * 3 + 1];
-          cz += _originalPositions[i * 3 + 2];
+          cx += positions[i * 3];
+          cy += positions[i * 3 + 1];
+          cz += positions[i * 3 + 2];
         }
         cx /= matchingIndices.length;
         cy /= matchingIndices.length;
@@ -4281,9 +4264,9 @@
 
         // Reposition: scale each matching point toward centroid
         for (const i of matchingIndices) {
-          const ox = _originalPositions[i * 3];
-          const oy = _originalPositions[i * 3 + 1];
-          const oz = _originalPositions[i * 3 + 2];
+          const ox = positions[i * 3];
+          const oy = positions[i * 3 + 1];
+          const oz = positions[i * 3 + 2];
           positions[i * 3]     = cx + (ox - cx) * scale;
           positions[i * 3 + 1] = cy + (oy - cy) * scale;
           positions[i * 3 + 2] = cz + (oz - cz) * scale;
@@ -4295,7 +4278,6 @@
         }
 
         // Set bounding sphere to cover ONLY visible points (not banished 1e7 ones)
-        // This makes raycaster broad-phase culling work correctly & efficiently
         let maxR2 = 0;
         for (const i of matchingIndices) {
           const dx = positions[i * 3] - cx;
@@ -4312,7 +4294,6 @@
 
       points.geometry.attributes.position.needsUpdate = true;
       if (!hasFilter || matchingIndices.length === 0) {
-        // Full recompute when no filter or no matches
         points.geometry.computeBoundingSphere();
       }
     }
@@ -4360,8 +4341,17 @@
           colors[existingIndex * 3 + 2] = color.b;
 
           const baseSize = sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount);
-          const match = memberMatchesLocationFilter(member, locationFilter);
+          const fActive = (locationFilter.country && locationFilter.country.trim()) || (locationFilter.region && locationFilter.region.trim()) || (locationFilter.city && locationFilter.city.trim());
+          const match = fActive ? memberMatchesLocationFilter(member, locationFilter) : true;
           sizes[existingIndex] = match ? baseSize : 0;
+          // Also banish non-matching positions when filter is active
+          if (fActive && !match) {
+            const positions = points.geometry.attributes.position.array;
+            positions[existingIndex * 3] = 1e7;
+            positions[existingIndex * 3 + 1] = 1e7;
+            positions[existingIndex * 3 + 2] = 1e7;
+            points.geometry.attributes.position.needsUpdate = true;
+          }
           activities[existingIndex] = Math.min(activity / 100, 1);
 
           // Update metadata — preserve existing profilePicture and position
@@ -4520,7 +4510,7 @@
       }
 
       syncUsernameToIndexMap();
-      _originalPositions = null; // Geometry changed — re-snapshot on next filter apply
+      // (metadata positions are the source of truth — no position snapshot needed)
       applyLocationFilter();
       // If URL has a user id or username, select that user (e.g. returning to a bookmarked link)
       if (points && pointMetadata.length > 0) applyUserFromUrl();
@@ -4765,7 +4755,7 @@
       points = new THREE.Points(geometry, material);
       scene.add(points);
 
-      _originalPositions = null; // New geometry — re-snapshot on next filter apply
+      // (metadata positions are the source of truth — no position snapshot needed)
       applyLocationFilter();
 
       // Restore navigation caches so opening previously visited members doesn't trigger API calls
