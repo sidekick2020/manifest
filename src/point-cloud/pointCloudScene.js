@@ -228,6 +228,8 @@
     let selectedMemberIndex = null;
     /** Location filter: { country, region, city }. Empty string = no filter for that field. */
     let locationFilter = { country: '', region: '', city: '' };
+    /** Original positions before location filter repositioning (saved to restore on clear) */
+    let _originalPositions = null;
     // True when page loaded with a user in URL — we show loading screen and do God-view fly-in when ready
     let _initialUrlUserPending = false;
     let _loadingScreenShownAt = 0;
@@ -644,10 +646,16 @@
       // Otherwise check member stars
       const intersects = raycaster.intersectObject(points);
 
-      if (intersects.length > 0) {
-        const point = intersects[0];
-        const index = point.index;
-        flashPoint(index);
+      // CRITICAL: Skip invisible (size=0) points — location filter hides points
+      // by setting size to 0, but raycaster still intersects them.
+      // Find the first intersection that has a visible (non-zero) size.
+      const sizes = points.geometry.attributes.size.array;
+      for (let i = 0; i < intersects.length; i++) {
+        const idx = intersects[i].index;
+        if (sizes[idx] > 0) {
+          flashPoint(idx);
+          return;
+        }
       }
     }
 
@@ -975,6 +983,7 @@
       memberIndexMap.set(id, nextIndex);
       loadedMemberIds.add(id);
       syncUsernameToIndexMap();
+      _originalPositions = null; // Geometry changed — re-snapshot on next filter apply
       applyLocationFilter();
       await loadPostsAndCommentsForUser(id);
       return nextIndex;
@@ -2118,6 +2127,7 @@
       // Register in memberIndexMap so planets orbit at the right position
       memberIndexMap.set(member.id, newIndex);
 
+      _originalPositions = null; // Geometry changed — re-snapshot on next filter apply
       applyLocationFilter();
       loadedMemberIds.add(member.id);
       const un = (member.username && String(member.username).trim()) ? String(member.username).trim().toLowerCase() : '';
@@ -4185,13 +4195,32 @@
       return true;
     }
 
-    /** Apply location filter: set size to 0 for points that don't match country/region/city. Region filter matches both region and state (e.g. Arkansas in state). */
+    /** Apply location filter: hide non-matching points AND reposition matching ones into a compact cluster.
+     *  When filter is cleared, restore original positions. */
     function applyLocationFilter() {
       if (!points || !points.geometry) return;
+      const positions = points.geometry.attributes.position.array;
       const sizes = points.geometry.attributes.size.array;
       const count = points.geometry.attributes.position.count;
       const f = locationFilter;
       const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
+
+      // Save original positions on first filter application
+      if (hasFilter && !_originalPositions) {
+        _originalPositions = new Float32Array(positions);
+      }
+
+      // Restore original positions when filter is cleared
+      if (!hasFilter && _originalPositions) {
+        for (let i = 0; i < _originalPositions.length; i++) {
+          positions[i] = _originalPositions[i];
+        }
+        _originalPositions = null;
+        points.geometry.attributes.position.needsUpdate = true;
+      }
+
+      // First pass: set sizes and collect matching point indices + positions
+      const matchingIndices = [];
       for (let i = 0; i < count; i++) {
         const meta = pointMetadata[i];
         if (i >= pointMetadata.length) {
@@ -4201,8 +4230,44 @@
         const match = memberMatchesLocationFilter(meta, f);
         const baseSize = sizeFromEngagement(meta.totalComments, meta.activity);
         sizes[i] = match ? baseSize : 0;
+        if (match && hasFilter) matchingIndices.push(i);
       }
+      sizes.needsUpdate = true;
       points.geometry.attributes.size.needsUpdate = true;
+
+      // Second pass: reposition matching points into a compact cluster
+      if (hasFilter && matchingIndices.length > 0 && _originalPositions) {
+        // Compute centroid of matching points (from original positions)
+        let cx = 0, cy = 0, cz = 0;
+        for (const i of matchingIndices) {
+          cx += _originalPositions[i * 3];
+          cy += _originalPositions[i * 3 + 1];
+          cz += _originalPositions[i * 3 + 2];
+        }
+        cx /= matchingIndices.length;
+        cy /= matchingIndices.length;
+        cz /= matchingIndices.length;
+
+        // Scale factor: sqrt(visible / total) — fewer visible = tighter cluster
+        const totalWithMeta = Math.max(pointMetadata.length, 1);
+        const scale = Math.max(0.05, Math.sqrt(matchingIndices.length / totalWithMeta));
+
+        // Reposition: scale each matching point toward centroid
+        for (const i of matchingIndices) {
+          const ox = _originalPositions[i * 3];
+          const oy = _originalPositions[i * 3 + 1];
+          const oz = _originalPositions[i * 3 + 2];
+          positions[i * 3]     = cx + (ox - cx) * scale;
+          positions[i * 3 + 1] = cy + (oy - cy) * scale;
+          positions[i * 3 + 2] = cz + (oz - cz) * scale;
+        }
+        points.geometry.attributes.position.needsUpdate = true;
+
+        // Move camera to centroid of filtered cluster
+        if (controls && controls.target) {
+          controls.target.set(cx, cy, cz);
+        }
+      }
     }
 
     // Helper function to enrich point cloud data incrementally
@@ -4408,6 +4473,7 @@
       }
 
       syncUsernameToIndexMap();
+      _originalPositions = null; // Geometry changed — re-snapshot on next filter apply
       applyLocationFilter();
       // If URL has a user id or username, select that user (e.g. returning to a bookmarked link)
       if (points && pointMetadata.length > 0) applyUserFromUrl();
@@ -4652,6 +4718,7 @@
       points = new THREE.Points(geometry, material);
       scene.add(points);
 
+      _originalPositions = null; // New geometry — re-snapshot on next filter apply
       applyLocationFilter();
 
       // Restore navigation caches so opening previously visited members doesn't trigger API calls
