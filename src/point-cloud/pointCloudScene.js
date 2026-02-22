@@ -220,6 +220,15 @@
         renderer = null;
         points = null;
         controls = null;
+        // Reset module-level state so React StrictMode remount starts clean
+        pointMetadata = [];
+        memberIndexMap.clear();
+        loadedMemberIds.clear();
+        usernameToIndexMap.clear();
+        selectedMemberIndex = null;
+        locationFilter = { country: '', region: '', city: '' };
+        _initialUrlUserPending = false;
+        _pendingFlyToIndex = null;
       };
     }
 
@@ -4315,14 +4324,8 @@
       state.members.forEach((member, id) => {
         const existingIndex = memberIndexMap.get(id);
 
-        if (existingIndex !== undefined) {
+        if (existingIndex !== undefined && points && points.geometry) {
           // UPDATE existing member — only refresh activity/color/size/metadata.
-          // NEVER overwrite position: the snapshot laid out all ~35k members together,
-          // so their positions are stable and correct. Incremental enrichment only has
-          // a small batch (~2500 members), so re-running evolve() on that mini-state
-          // produces positions that are completely different from the full-universe
-          // layout. Overwriting would teleport stars (and their orbiting planets)
-          // off-screen mid-session.
           const pe = indexes.postsByCreator.get(id);
           const ce = indexes.commentsByMember.get(id);
           const postCount = pe ? pe.count : 0;
@@ -4524,7 +4527,7 @@
     // exactly where we left off, only fetching members we don't have yet.
 
     const SNAPSHOT_KEY = 'universeSnapshot';
-    const SNAPSHOT_VERSION = 5; // bumped — invalidate old snapshots missing location fields (region/state/city/country)
+    const SNAPSHOT_VERSION = 6; // bumped — invalidate snapshots with positions corrupted by location filter (1e7 banish)
     const NAV_CACHE_KEY = 'universeNavCache';   // beam + post caches so restore = no refetch when navigating
     const NAV_CACHE_VERSION = 1;
     const NAV_CACHE_MAX_USERS = 60;            // cap so localStorage doesn't blow up
@@ -4562,7 +4565,6 @@
     function saveSnapshot(skips) {
       if (!pointMetadata || pointMetadata.length === 0) return;
       const geo = points && points.geometry;
-      const posArr = geo ? geo.attributes.position.array : null;
       const sizeArr = geo ? geo.attributes.size.array : null;
       const actArr = geo ? geo.attributes.activity.array : null;
 
@@ -4571,9 +4573,12 @@
       const members = [];
       for (let i = 0; i < cap; i++) {
         const m = pointMetadata[i];
-        const x = posArr ? posArr[i * 3]     : (m?.position != null && typeof m.position.x === 'number' ? m.position.x : 0);
-        const y = posArr ? posArr[i * 3 + 1] : (m?.position != null && typeof m.position.y === 'number' ? m.position.y : 0);
-        const z = posArr ? posArr[i * 3 + 2] : (m?.position != null && typeof m.position.z === 'number' ? m.position.z : 0);
+        // Always save from metadata.position (source of truth for original positions).
+        // Geometry positions may be corrupted by location filter (banished to 1e7 or
+        // compacted toward centroid). Metadata positions are never modified by the filter.
+        const x = m?.position != null && typeof m.position.x === 'number' ? m.position.x : 0;
+        const y = m?.position != null && typeof m.position.y === 'number' ? m.position.y : 0;
+        const z = m?.position != null && typeof m.position.z === 'number' ? m.position.z : 0;
         const tc = m.totalComments != null ? m.totalComments : (m.TotalComments != null ? m.TotalComments : null);
         members.push({
           id:            m.id,
