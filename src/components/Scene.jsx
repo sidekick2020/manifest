@@ -418,12 +418,12 @@ export function Scene() {
       const slicedMembers = slicer.slice(locationVisible, sliceOptions);
       const sliceInfo = slicer.getSliceInfo(locationVisible, slicedMembers);
 
-      // Final filtered set: temporal-sliced subset of location-filtered members
-      // Only members with a targetPos can actually render
-      const filteredMembers = new Map();
-      slicedMembers.forEach((m, id) => {
-        if (targetPos.has(id)) filteredMembers.set(id, m);
-      });
+      // Final filtered set: temporal-sliced subset of location-filtered members.
+      // Don't gate on targetPos here — the position update loop naturally skips
+      // members without targets, and members without m.position won't enter the
+      // octree or render. Gating here would block rendering before the first
+      // feed cycle populates targetPos.
+      const filteredMembers = slicedMembers;
 
       // Update filtered IDs ref so click handler can validate targets
       const fIds = filteredIdsRef.current;
