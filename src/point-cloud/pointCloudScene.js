@@ -1,6 +1,6 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-    import { getLocationFilterOptions as getCodecLocationOptions, addLocationFromMember, normalizeRegion, isUSState, buildIndexes } from '../../lib/codec.js';
+    import { buildIndexes } from '../../lib/codec.js';
 
     let scene, camera, renderer, points, controls;
     let rotating = false; // Start paused for better UX
@@ -226,8 +226,6 @@
     // Store point metadata for interaction
     let pointMetadata = [];
     let selectedMemberIndex = null;
-    /** Location filter: { country, region, city }. Empty string = no filter for that field. */
-    let locationFilter = { country: '', region: '', city: '' };
     // True when page loaded with a user in URL — we show loading screen and do God-view fly-in when ready
     let _initialUrlUserPending = false;
     let _loadingScreenShownAt = 0;
@@ -340,13 +338,6 @@
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
         float camDist = length(mvPosition.xyz);
         vCamDist = camDist;
-
-        // Filtered-out points (location filter): size is 0 → don't draw at all
-        if (size < 0.001) {
-          gl_PointSize = 0.0;
-          gl_Position = projectionMatrix * mvPosition;
-          return;
-        }
 
         // Distance-based LOD
         // Far (250+): larger minimum so stars stay visible and bright from distance
@@ -899,7 +890,6 @@
       const id = u.objectId;
       if (memberIndexMap.get(id) !== undefined) return memberIndexMap.get(id);
 
-      addLocationFromMember(u);
       const proPicUrl = (u.proPic && (typeof u.proPic === 'string' ? u.proPic : u.proPic.url)) || (u.profilePicture && (typeof u.profilePicture === 'string' ? u.profilePicture : u.profilePicture.url)) || null;
       const codecModule = await import('../../lib/codec.js');
       const { createState, evolve, DEFAULT_PARAMS } = codecModule;
@@ -944,7 +934,7 @@
       newPos.set(oldPos); newPos[oldPos.length] = px; newPos[oldPos.length + 1] = py; newPos[oldPos.length + 2] = pz;
       newCol.set(oldCol); newCol[oldCol.length] = color.r; newCol[oldCol.length + 1] = color.g; newCol[oldCol.length + 2] = color.b;
       const sizeForNew = sizeFromEngagement(u.TotalComments);
-      newSize.set(oldSize); newSize[oldSize.length] = memberMatchesLocationFilter(u, locationFilter) ? sizeForNew : 0;
+      newSize.set(oldSize); newSize[oldSize.length] = sizeForNew;
       newAct.set(oldAct); newAct[oldAct.length] = 0;
       newIdxArr.set(oldIdx); newIdxArr[oldIdx.length] = nextIndex;
       points.geometry.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
@@ -975,7 +965,6 @@
       memberIndexMap.set(id, nextIndex);
       loadedMemberIds.add(id);
       syncUsernameToIndexMap();
-      applyLocationFilter();
       await loadPostsAndCommentsForUser(id);
       return nextIndex;
     }
@@ -2107,7 +2096,7 @@
       points.geometry.setAttribute('activity', new THREE.BufferAttribute(newActivities, 1));
       points.geometry.setAttribute('vertexIndex', new THREE.BufferAttribute(newVertexIndices, 1));
 
-      addLocationFromMember(member);
+
 
       // Add to metadata
       pointMetadata.push({
@@ -2118,7 +2107,6 @@
       // Register in memberIndexMap so planets orbit at the right position
       memberIndexMap.set(member.id, newIndex);
 
-      applyLocationFilter();
       loadedMemberIds.add(member.id);
       const un = (member.username && String(member.username).trim()) ? String(member.username).trim().toLowerCase() : '';
       if (un && un !== 'anonymous' && !/^user\d+$/.test(un)) {
@@ -4014,18 +4002,6 @@
       sidebar.classList.toggle('visible');
     };
 
-    /** Return all accumulated region/city/country values from codec (all users ever loaded), not just current point cloud. */
-    window.getLocationFilterOptions = () => getCodecLocationOptions();
-
-    /** Set location filter and re-apply (hide non-matching points). */
-    window.setLocationFilter = (f) => {
-      locationFilter = {
-        country: (f && f.country) ? String(f.country).trim() : '',
-        region:  (f && f.region)  ? String(f.region).trim()  : '',
-        city:    (f && f.city)   ? String(f.city).trim()    : '',
-      };
-      applyLocationFilter();
-    };
 
     // Click outside to close admin sidebar
     function handleClickOutside(event) {
@@ -4153,57 +4129,6 @@
       return 2 + Math.log(1 + n) * 0.6;
     }
 
-    /** Normalize string for location comparison: string, trim, collapse whitespace, lowercase. */
-    function normLoc(s) {
-      return String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-    }
-
-    /** US country values we accept when filtering by a US state (e.g. Arkansas). Excludes non-US "Arkansas" etc. */
-    const US_COUNTRY_VARIANTS = new Set(['', 'us', 'usa', 'united states', 'united states of america']);
-
-    /** Returns true if member/metadata matches current location filter (country, region/state, city).
-     *  Uses normalizeRegion so "AR" matches "Arkansas" and vice versa. */
-    function memberMatchesLocationFilter(meta, f) {
-      if (!meta) return false;
-      const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
-      if (!hasFilter) return true;
-      if (f.country && f.country.trim()) {
-        if (normLoc(meta.country) !== normLoc(f.country)) return false;
-      }
-      if (f.region && f.region.trim()) {
-        const regionVal = normalizeRegion(f.region);
-        const metaRegion = normalizeRegion(meta.region);
-        const metaState = normalizeRegion(meta.state);
-        if (metaRegion !== regionVal && metaState !== regionVal) return false;
-        // When filtering by a US state (e.g. Arkansas), require country to be US or empty so we don't show "Arkansas, UK" etc.
-        // Only apply this check for known US states — non-US regions should not be excluded.
-        if (regionVal && isUSState(regionVal) && !US_COUNTRY_VARIANTS.has(normLoc(meta.country))) return false;
-      }
-      if (f.city && f.city.trim()) {
-        if (normLoc(meta.city) !== normLoc(f.city)) return false;
-      }
-      return true;
-    }
-
-    /** Apply location filter: set size to 0 for points that don't match country/region/city. Region filter matches both region and state (e.g. Arkansas in state). */
-    function applyLocationFilter() {
-      if (!points || !points.geometry) return;
-      const sizes = points.geometry.attributes.size.array;
-      const count = points.geometry.attributes.position.count;
-      const f = locationFilter;
-      const hasFilter = (f.country && f.country.trim()) || (f.region && f.region.trim()) || (f.city && f.city.trim());
-      for (let i = 0; i < count; i++) {
-        const meta = pointMetadata[i];
-        if (i >= pointMetadata.length) {
-          if (hasFilter) sizes[i] = 0;
-          continue;
-        }
-        const match = memberMatchesLocationFilter(meta, f);
-        const baseSize = sizeFromEngagement(meta.totalComments, meta.activity);
-        sizes[i] = match ? baseSize : 0;
-      }
-      points.geometry.attributes.size.needsUpdate = true;
-    }
 
     // Helper function to enrich point cloud data incrementally
     function enrichPointCloudData(state) {
@@ -4248,8 +4173,7 @@
           colors[existingIndex * 3 + 2] = color.b;
 
           const baseSize = sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount);
-          const match = memberMatchesLocationFilter(member, locationFilter);
-          sizes[existingIndex] = match ? baseSize : 0;
+          sizes[existingIndex] = baseSize;
           activities[existingIndex] = Math.min(activity / 100, 1);
 
           // Update metadata — preserve existing profilePicture and position
@@ -4295,8 +4219,7 @@
           newColors.push(color.r, color.g, color.b);
 
           const baseSize = sizeFromEngagement(member.totalComments ?? member.TotalComments, commentCount);
-          const match = memberMatchesLocationFilter(member, locationFilter);
-          newSizes.push(match ? baseSize : 0);
+          newSizes.push(baseSize);
           newActivities.push(Math.min(activity / 100, 1));
           newVertexIndices.push(nextIndex);
 
@@ -4408,7 +4331,6 @@
       }
 
       syncUsernameToIndexMap();
-      applyLocationFilter();
       // If URL has a user id or username, select that user (e.g. returning to a bookmarked link)
       if (points && pointMetadata.length > 0) applyUserFromUrl();
     }
@@ -4581,7 +4503,6 @@
       }
 
       toShow.forEach((m, i) => {
-        addLocationFromMember(m);
         const mx = getCoord(m, 'x');
         const my = getCoord(m, 'y');
         const mz = getCoord(m, 'z');
@@ -4651,8 +4572,6 @@
       }
       points = new THREE.Points(geometry, material);
       scene.add(points);
-
-      applyLocationFilter();
 
       // Restore navigation caches so opening previously visited members doesn't trigger API calls
       if (typeof beamDataCache !== 'undefined' && typeof postCacheByUser !== 'undefined') {

@@ -8,7 +8,6 @@ import { useRef, useLayoutEffect } from 'react';
 import { init } from './pointCloudScene.js';
 import { LoadingScreen } from './LoadingScreen';
 import { SearchBar } from './SearchBar';
-import { LocationFilter } from './LocationFilter';
 import { StarLabel } from './StarLabel';
 import { DetailPanel } from './DetailPanel';
 import { AdminSidebar } from './AdminSidebar';
@@ -39,8 +38,6 @@ export function PointCloudApp() {
       </button>
 
       <SearchBar />
-
-      <LocationFilter />
 
       <button
         type="button"
